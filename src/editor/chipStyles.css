@@ -1,0 +1,136 @@
+.chip,
+span[data-chip] {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid;
+  user-select: none;
+  -webkit-user-drag: none;
+  vertical-align: baseline;
+  white-space: nowrap;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin: 0 2px;
+  position: relative;
+  transition: all 0.15s;
+}
+
+.chip--TYPE_FILL,
+span[data-chip][data-type="TYPE_FILL"] {
+  background: #dcfce7;
+  border-color: #86efac;
+  color: #15803d;
+}
+
+.chip--TYPE_FILL:hover,
+span[data-chip][data-type="TYPE_FILL"]:hover {
+  background: #bbf7d0;
+}
+
+.chip--TYPE_DESCRIPTION,
+span[data-chip][data-type="TYPE_DESCRIPTION"] {
+  background: #dbeafe;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+
+.chip--TYPE_DESCRIPTION:hover,
+span[data-chip][data-type="TYPE_DESCRIPTION"]:hover {
+  background: #bfdbfe;
+}
+
+.chip.ProseMirror-selectednode,
+.chip--selected {
+  outline: none !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+}
+
+.chip--flash {
+  animation: chipFlash 0.3s ease 3;
+}
+
+.html-block,
+[data-html-block] {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  background: #f0fdf4;
+  border: 2px solid #86efac;
+  border-radius: 8px;
+  padding: 12px;
+  margin: 8px 0;
+  cursor: pointer;
+  -webkit-user-drag: none;
+  transition: all 0.15s;
+}
+
+[data-html-block] *,
+.html-block * {
+  -webkit-user-drag: none;
+}
+
+.html-block:hover,
+[data-html-block]:hover {
+  border-color: #4ade80;
+}
+
+.html-block--selected {
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.html-block--flash {
+  animation: phFlash 0.3s ease;
+}
+
+[data-html-block] table {
+  width: 100% !important;
+  border-collapse: collapse;
+  background: #fff;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+[data-html-block] table td,
+[data-html-block] table th {
+  border: 1px solid #d1dae6;
+  padding: 6px 10px;
+  min-width: 72px;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+
+[data-html-block] table th {
+  background: #f1f5f9;
+  color: #0f172a;
+  font-weight: 600;
+}
+
+@keyframes chipFlash {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+  }
+
+  50% {
+    box-shadow: 0 0 0 6px rgba(59, 130, 246, 0.5);
+  }
+}
+
+@keyframes phFlash {
+  0%,
+  100% {
+    border-color: #3b82f6;
+  }
+
+  50% {
+    border-color: #fbbf24;
+  }
+}
