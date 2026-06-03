@@ -163,6 +163,7 @@ async function handleSubmit() {
 			custom_id: store.customId,
 		}
 		console.log('[submit payload]', payload)
+		return
 		const res = await submitTemplate(payload)
 		alert(`提交成功！template_id: ${res.template_id}`)
 		console.log('[submit response]', res)

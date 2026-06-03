@@ -201,13 +201,17 @@ export const useTemplateStore = defineStore('template', () => {
     }
   }
 
-  // 对指定章节内的 key 按在 templateMarkdown 中出现的顺序重新编号
+  // 对指定章节内的 key 按在对应 section 的 template_content 中出现的顺序重新编号
   function reindexSection(sectionNum: number) {
     const prefix = `key_${sectionNum}_`
-    // 找出该章节所有 key，按在 templateMarkdown 中出现的位置排序
+    // sectionNum 直接对应 sections 数组索引
+    const section = sections.value[sectionNum]
+    const referenceText = section?.template_content || templateMarkdown.value
+
+    // 找出该章节所有 key，按在 referenceText 中出现的位置排序
     const sectionPhs = placeholders.value
       .filter(p => p.key.startsWith(prefix) && p.key.endsWith('_md'))
-      .map(p => ({ ph: p, pos: templateMarkdown.value.indexOf(`{{${p.key}}}`) }))
+      .map(p => ({ ph: p, pos: referenceText.indexOf(`{{${p.key}}}`) }))
       .sort((a, b) => a.pos - b.pos)
 
     let idx = 1
@@ -237,7 +241,7 @@ export const useTemplateStore = defineStore('template', () => {
     templateMarkdown.value = replaceFirst(templateMarkdown.value, normalizedPh.original, token)
 
     const sectionNum = parseSectionNumFromKey(normalizedPh.key)
-    const preferredIndex = sectionNum ? sectionNum - 1 : -1
+    const preferredIndex = sectionNum !== null ? sectionNum : -1
     const preferredSection = sections.value[preferredIndex]
     const canUsePreferred = Boolean(preferredSection?.template_content?.includes(normalizedPh.original))
     let replaced = false
@@ -268,7 +272,7 @@ export const useTemplateStore = defineStore('template', () => {
     templateMarkdown.value = replaceFirst(templateMarkdown.value, normalizedPh.original, token)
 
     const sectionNum = parseSectionNumFromKey(normalizedPh.key)
-    const preferredIndex = sectionNum ? sectionNum - 1 : -1
+    const preferredIndex = sectionNum !== null ? sectionNum : -1
     const preferredSection = sections.value[preferredIndex]
     const canUsePreferred = Boolean(preferredSection?.template_content?.includes(normalizedPh.original))
     let replaced = false

@@ -39,6 +39,7 @@ import { NodeSelection } from '@tiptap/pm/state'
 import { DOMSerializer } from '@tiptap/pm/model'
 import { ChipNode } from '../editor/ChipNode'
 import { HtmlBlockNode } from '../editor/HtmlBlockNode'
+import { SectionNode } from '../editor/SectionNode'
 import { useTemplateStore } from '../stores/template'
 import '../editor/chipStyles.css'
 import MarkdownIt from 'markdown-it'
@@ -51,6 +52,17 @@ const hasSelection = ref(false)
 let skipNextSync = false
 let editorReady = false
 let preserveClickedSelection = false
+let syncDebounceTimer: ReturnType<typeof setTimeout> | null = null
+let isSettingContent = false
+
+function debouncedSyncSections() {
+	if (syncDebounceTimer !== null) clearTimeout(syncDebounceTimer)
+	syncDebounceTimer = setTimeout(() => {
+		syncDebounceTimer = null
+		skipNextSync = true
+		syncSectionsFromEditor()
+	}, 300)
+}
 
 const sectionTitleCount = computed(() => getUniqueSectionTitles().length)
 
@@ -165,6 +177,7 @@ watch(
 const editor = useEditor({
 	extensions: [
 		StarterKit,
+		SectionNode,
 		HtmlBlockNode,
 		ChipNode,
 	],
@@ -210,6 +223,10 @@ const editor = useEditor({
 			}
 		}
 	},
+	onUpdate() {
+		if (!editorReady || isSettingContent) return
+		debouncedSyncSections()
+	},
 })
 
 function getClickedPlaceholderKey(target: EventTarget | null): string | null {
@@ -236,8 +253,10 @@ watch(
 			skipNextSync = false
 			return
 		}
+		isSettingContent = true
 		editor.value.commands.setContent(buildEditorHtml())
 		nextTick(() => {
+			isSettingContent = false
 			scanChips(editor.value!)
 		})
 	},
@@ -279,16 +298,17 @@ function buildEditorHtml(): string {
 	if (store.sections.length) {
 		const usedTitles = new Set<string>()
 		return store.sections
-			.map((section) => {
+			.map((section, index) => {
 				const title = getSectionDisplayTitle(section.title)
 				const titleKey = normalizeSectionTitle(title)
 				const shouldRenderTitle = Boolean(titleKey) && !usedTitles.has(titleKey)
 				if (titleKey) usedTitles.add(titleKey)
 				const source = section.template_content || section.content || ''
-				return [
+				const inner = [
 					shouldRenderTitle ? `<h2>${escapeHtml(title)}</h2>` : '',
 					markdownToHtml(source, store.placeholders),
 				].join('')
+				return `<div data-section-index="${index}">${inner}</div>`
 			})
 			.join('')
 	}
@@ -470,7 +490,7 @@ function extractSelectedContent(from: number, to: number): string {
 	const doc = editor.value.state.doc
 	const parts: string[] = []
 
-	doc.nodesBetween(from, to, (node) => {
+	doc.nodesBetween(from, to, (node, pos) => {
 		if (node.type.name === 'htmlBlock') {
 			const encoded = node.attrs.encoded || ''
 			if (encoded) {
@@ -483,13 +503,118 @@ function extractSelectedContent(from: number, to: number): string {
 			return false // 不遍历子节点
 		}
 		if (node.isText) {
-			// 计算实际在选区范围内的文本
-			parts.push(node.text || '')
+			// 裁剪到选区范围内的实际文本
+			const textStart = Math.max(from, pos) - pos
+			const textEnd = Math.min(to, pos + node.nodeSize) - pos
+			const sliced = (node.text || '').slice(textStart, textEnd)
+			if (sliced) parts.push(sliced)
 		}
 		return true
 	})
 
 	return parts.join('\n').trim()
+}
+
+// 从选区的 DOM 位置找到所在 section 的索引
+function getSectionIndexFromSelection(): number {
+	if (!editor.value) return 0
+	const { from } = editor.value.state.selection
+	try {
+		const domAtPos = editor.value.view.domAtPos(from)
+		const node = domAtPos.node instanceof Element ? domAtPos.node : domAtPos.node.parentElement
+		const sectionDiv = node?.closest('[data-section-index]')
+		if (sectionDiv) {
+			return parseInt(sectionDiv.getAttribute('data-section-index') || '0', 10)
+		}
+	} catch {
+		// fallback
+	}
+	return 0
+}
+
+// 从编辑器文档中重建每个 section 的 template_content 和 placeholders
+function syncSectionsFromEditor() {
+	if (!editor.value || !store.sections.length) return
+	const doc = editor.value.state.doc
+
+	doc.forEach((node) => {
+		if (node.type.name !== 'section') return
+		const sectionIndex = node.attrs.index as number
+		if (sectionIndex < 0 || sectionIndex >= store.sections.length) return
+
+		const parts: string[] = []
+		const sectionKeys: string[] = []
+		let sectionTitle: string | null = null
+
+		// 遍历 section 节点下的顶层块节点
+		node.forEach((block) => {
+			// 提取 heading 文本作为 title
+			if (block.type.name === 'heading') {
+				sectionTitle = block.textContent || ''
+				return
+			}
+
+			if (block.type.name === 'htmlBlock') {
+				const chipKey = block.attrs.chipKey || ''
+				if (chipKey) {
+					parts.push(`{{${chipKey}}}`)
+					sectionKeys.push(chipKey)
+				} else {
+					const encoded = block.attrs.encoded || ''
+					if (encoded) {
+						try {
+							parts.push(decodeURIComponent(atob(encoded)))
+						} catch { /* skip */ }
+					}
+				}
+				return
+			}
+
+			// paragraph 或其他块：遍历内联子节点
+			const blockParts: string[] = []
+			block.descendants((child) => {
+				if (child.type.name === 'chip') {
+					const key = child.attrs.key || ''
+					if (key) {
+						blockParts.push(`{{${key}}}`)
+						sectionKeys.push(key)
+					}
+					return false
+				}
+				if (child.isText) {
+					blockParts.push(child.text || '')
+				}
+				return true
+			})
+			const line = blockParts.join('')
+			if (line) parts.push(line)
+		})
+
+		const newTemplateContent = parts.join('\n\n')
+
+		// 用占位符 original 还原 {{key}} 得到 content 原文
+		const phMap = new Map(store.placeholders.map(p => [p.key, p]))
+		const newContent = newTemplateContent.replace(/\{\{([\w]+)\}\}/g, (_, key) => {
+			return phMap.get(key)?.original || `{{${key}}}`
+		})
+
+		store.sections[sectionIndex] = {
+			...store.sections[sectionIndex],
+			...(sectionTitle !== null ? { title: sectionTitle } : {}),
+			template_content: newTemplateContent,
+			content: newContent,
+		}
+	})
+
+	// 重建 template_markdown：各 section 标题 + template_content 拼接
+	const mdParts: string[] = []
+	for (const sec of store.sections) {
+		if (sec.title) {
+			mdParts.push(sec.title)
+		}
+		mdParts.push(sec.template_content || '')
+	}
+	store.templateMarkdown = mdParts.join('\n\n')
 }
 
 function addChipFromSelection() {
@@ -498,6 +623,8 @@ function addChipFromSelection() {
 	if (from === to) return
 
 	const sel = editor.value.state.selection
+	const sectionIndex = getSectionIndexFromSelection()
+	const sectionNum = sectionIndex
 
 	// --- 表格 HtmlBlockNode 特殊处理 ---
 	if (sel instanceof NodeSelection && sel.node.type.name === 'htmlBlock') {
@@ -510,8 +637,6 @@ function addChipFromSelection() {
 			tableHtml = decodeURIComponent(atob(encoded))
 		} catch { return }
 
-		const textBefore = editor.value.state.doc.textBetween(0, from)
-		const sectionNum = store.getSectionNum(textBefore)
 		const autoKey = store.generateKey(sectionNum)
 
 		const inputKey = prompt('请输入占位符 key 名称：', autoKey)
@@ -519,7 +644,7 @@ function addChipFromSelection() {
 		const key = store.normalizePlaceholderKey(inputKey)
 		if (!key) return
 
-		// 和普通文本一样，用 ChipNode 显示原始 HTML 标签文本
+		// 用 ChipNode 显示原始 HTML 标签文本
 		editor.value.chain().focus().deleteSelection().insertChip({
 			key,
 			original: tableHtml,
@@ -531,7 +656,7 @@ function addChipFromSelection() {
 		}).run()
 
 		skipNextSync = true
-		store.addPlaceholderFromOriginal({
+		store.addPlaceholder({
 			key,
 			original: tableHtml,
 			originalHtml: tableHtml,
@@ -540,15 +665,13 @@ function addChipFromSelection() {
 			field: null,
 			prompt: null,
 		})
+		syncSectionsFromEditor()
 		store.selectChip(key)
 		return
 	}
 
 	// --- 普通文本选区 ---
 	const selectedContent = extractSelectedContent(from, to)
-	const selectedHtml = extractSelectedHtml(from, to)
-	const textBefore = editor.value.state.doc.textBetween(0, from)
-	const sectionNum = store.findSectionNumByOriginal(selectedContent) || store.getSectionNum(textBefore)
 	const autoKey = store.generateKey(sectionNum)
 
 	const inputKey = prompt('请输入占位符 key 名称：', autoKey)
@@ -567,15 +690,15 @@ function addChipFromSelection() {
 	}).run()
 
 	skipNextSync = true
-	store.addPlaceholderFromOriginal({
+	store.addPlaceholder({
 		key,
 		original: selectedContent,
-		originalHtml: selectedHtml || undefined,
 		type: 'TYPE_DESCRIPTION',
 		fill_mode: 'newline',
 		field: null,
 		prompt: null,
 	})
+	syncSectionsFromEditor()
 	store.selectChip(key)
 }
 
