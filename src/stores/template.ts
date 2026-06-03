@@ -168,12 +168,48 @@ export const useTemplateStore = defineStore('template', () => {
   }
 
   // 同步从所有 section 的 template_content 中移除 key（还原为原文）
-  function removeSectionsKey(key: string, original: string) {
+  function removeSectionsKey(key: string, restoreContent: string) {
     const re = new RegExp(`\\{\\{${key}\\}\\}`, 'g')
     sections.value = sections.value.map(sec => ({
       ...sec,
-      template_content: (sec.template_content || '').replace(re, original),
+      template_content: (sec.template_content || '').replace(re, restoreContent),
     }))
+  }
+
+  function unwrapPlaceholderRestoreContent(content: string): string {
+    if (!content || !/(data-chip|data-html-block)/i.test(content)) return content
+    if (typeof document === 'undefined') return content
+
+    const wrapper = document.createElement('div')
+    wrapper.innerHTML = content
+
+    wrapper.querySelectorAll('[data-html-block]').forEach((el) => {
+      const encoded = el.getAttribute('data-html-encoded') || ''
+      if (!encoded) return
+
+      try {
+        const html = decodeURIComponent(atob(encoded))
+        const replacement = document.createElement('div')
+        replacement.innerHTML = html
+        const fragment = document.createDocumentFragment()
+        Array.from(replacement.childNodes).forEach(node => fragment.appendChild(node))
+        el.replaceWith(fragment)
+      } catch {
+        el.replaceWith(document.createTextNode(el.textContent || ''))
+      }
+    })
+
+    wrapper.querySelectorAll('span[data-chip]').forEach((el) => {
+      const original = el.getAttribute('data-original') || el.textContent || ''
+      el.replaceWith(document.createTextNode(original))
+    })
+
+    return wrapper.innerHTML.trim() || wrapper.textContent || content
+  }
+
+  function getPlaceholderRestoreContent(ph: Placeholder): string {
+    const restoreContent = ph.originalHtml?.trim() || ph.original || ''
+    return unwrapPlaceholderRestoreContent(restoreContent)
   }
 
   // 删除后重排该章节内所有 key 的序号
@@ -182,11 +218,13 @@ export const useTemplateStore = defineStore('template', () => {
     if (!ph) return
 
     pushDeleted({ ...ph })
+    pendingRemoveKey.value = key
 
-    // 把 templateMarkdown 和 sections[].template_content 里的 {{key}} 替换为 original 原文
+    // 把 {{key}} 替换为添加占位符前的内容，优先保留原 HTML 格式。
+    const restoreContent = getPlaceholderRestoreContent(ph)
     const re = new RegExp(`\\{\\{${key}\\}\\}`, 'g')
-    templateMarkdown.value = templateMarkdown.value.replace(re, ph.original || '')
-    removeSectionsKey(key, ph.original || '')
+    templateMarkdown.value = templateMarkdown.value.replace(re, restoreContent)
+    removeSectionsKey(key, restoreContent)
     placeholders.value = placeholders.value.filter(p => p.key !== key)
 
     // 提取章节号

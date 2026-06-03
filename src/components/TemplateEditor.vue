@@ -244,20 +244,25 @@ watch(
 	() => {
 		const mdKey = store.templateMarkdown
 		const sectionsKey = store.sections.map(s => s.template_content || '').join('\x00')
-		const placeholderStructureKey = store.placeholders.map(p => `${p.key}:${p.original}`).join('|')
-		return mdKey + '\x01' + sectionsKey + '\x01' + placeholderStructureKey
+		const placeholderStructureKey = store.placeholders.map(p => `${p.key}:${p.original}:${p.originalHtml || ''}`).join('|')
+		return mdKey + '\x01' + sectionsKey + '\x01' + placeholderStructureKey + '\x01' + (store.pendingRemoveKey || '')
 	},
 	() => {
 		if (!editorReady || !editor.value || !store.templateMarkdown) return
-		if (skipNextSync) {
+		const forceRebuild = Boolean(store.pendingRemoveKey)
+		if (skipNextSync && !forceRebuild) {
 			skipNextSync = false
 			return
 		}
+		skipNextSync = false
 		isSettingContent = true
 		editor.value.commands.setContent(buildEditorHtml())
 		nextTick(() => {
 			isSettingContent = false
 			scanChips(editor.value!)
+			if (forceRebuild) {
+				store.pendingRemoveKey = null
+			}
 		})
 	},
 )
@@ -672,6 +677,7 @@ function addChipFromSelection() {
 
 	// --- 普通文本选区 ---
 	const selectedContent = extractSelectedContent(from, to)
+	const selectedHtml = extractSelectedHtml(from, to)
 	const autoKey = store.generateKey(sectionNum)
 
 	const inputKey = prompt('请输入占位符 key 名称：', autoKey)
@@ -693,6 +699,7 @@ function addChipFromSelection() {
 	store.addPlaceholder({
 		key,
 		original: selectedContent,
+		originalHtml: selectedHtml || undefined,
 		type: 'TYPE_DESCRIPTION',
 		fill_mode: 'newline',
 		field: null,
