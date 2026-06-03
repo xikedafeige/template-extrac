@@ -1,21 +1,73 @@
 <template>
-  <div class="app" @dragstart.capture.prevent @drop.capture.prevent>
-    <TemplateUpload />
-    <div class="main">
+  <TemplateList
+    v-if="view === 'list'"
+    @create="openCreate"
+    @edit="openEdit"
+  />
+  <div v-else class="app" @dragstart.capture.prevent @drop.capture.prevent>
+    <TemplateUpload
+      :mode="view === 'edit' ? 'edit' : 'create'"
+      @back-list="backToList"
+    />
+    <div v-if="detailLoading" class="workbench-loading">加载模板数据中...</div>
+    <div v-else class="main">
       <div class="editor-panel">
         <TemplateEditor />
       </div>
       <div class="config-panel">
-        <MappingTable />
+        <MappingTable
+          :is-edit-mode="view === 'edit'"
+          @submit="backToList"
+          @edit="backToList"
+        />
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
+import { getTemplateDetail } from './api/template'
 import TemplateUpload from './components/TemplateUpload.vue'
 import TemplateEditor from './components/TemplateEditor.vue'
 import MappingTable from './components/MappingTable.vue'
+import TemplateList from './views/TemplateList.vue'
+import { useTemplateStore } from './stores/template'
+
+type AppView = 'list' | 'create' | 'edit'
+
+const store = useTemplateStore()
+const view = ref<AppView>('list')
+const detailLoading = ref(false)
+
+function openCreate() {
+  store.resetForCreate()
+  view.value = 'create'
+}
+
+async function openEdit(templateId: string) {
+  view.value = 'edit'
+  detailLoading.value = true
+  try {
+    const res = await getTemplateDetail(templateId)
+    if (res.code === 0 && res.data) {
+      store.loadFromDetail(res.data)
+    } else {
+      alert('获取模板详情失败')
+      backToList()
+    }
+  } catch (err: any) {
+    alert('获取模板详情失败: ' + (err.response?.data?.message || err.message))
+    backToList()
+  } finally {
+    detailLoading.value = false
+  }
+}
+
+function backToList() {
+  store.resetForCreate()
+  view.value = 'list'
+}
 </script>
 
 <style>
@@ -24,11 +76,22 @@ import MappingTable from './components/MappingTable.vue'
   display: flex;
   flex-direction: column;
 }
+
+.workbench-loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+  font-size: 14px;
+}
+
 .main {
   flex: 1;
   display: flex;
   overflow: hidden;
 }
+
 .editor-panel {
   flex: 1;
   min-width: 0;
@@ -37,6 +100,7 @@ import MappingTable from './components/MappingTable.vue'
   flex-direction: column;
   background: #ffffff;
 }
+
 .config-panel {
   width: 420px;
   display: flex;

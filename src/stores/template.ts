@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
-import type { Placeholder, Section, SubmitSection } from '../types/template'
+import type { Placeholder, Section, SubmitSection, TemplateDetail } from '../types/template'
 
 const STORAGE_KEY = 'template_store_data'
 
@@ -14,7 +14,15 @@ function loadFromStorage() {
   return null
 }
 
-function saveToStorage(data: { templateMarkdown: string; placeholders: Placeholder[]; sections: Section[]; templateName: string; customId: string }) {
+function saveToStorage(data: {
+  templateMarkdown: string
+  placeholders: Placeholder[]
+  sections: Section[]
+  templateName: string
+  templateDescription: string
+  templateId: string
+  customId: string
+}) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
   } catch (e) {
@@ -91,6 +99,9 @@ export const useTemplateStore = defineStore('template', () => {
   const pendingRemoveKey = ref<string | null>(null)
   const suppressEditorSync = ref(false)
   const templateName = ref(saved?.templateName || '')
+  const templateDescription = ref(saved?.templateDescription || '')
+  const templateId = ref(saved?.templateId || '')
+  const isEditMode = ref(Boolean(saved?.templateId))
   const customId = ref(saved?.customId || '')
 
   const availableFields = ref<string[]>([
@@ -105,6 +116,37 @@ export const useTemplateStore = defineStore('template', () => {
     sections.value = secs
     deletedStack.value = []
     selectedChipKey.value = null
+  }
+
+  function loadFromDetail(data: TemplateDetail) {
+    templateId.value = data.template_id
+    templateName.value = data.template_name || ''
+    templateDescription.value = data.template_description || ''
+    customId.value = data.custom_id || ''
+    templateMarkdown.value = data.template_markdown || ''
+    sections.value = data.sections || []
+    placeholders.value = sortPlaceholders(
+      sections.value.flatMap(sec => sec.placeholders || [])
+    )
+    isEditMode.value = true
+    deletedStack.value = []
+    selectedChipKey.value = null
+    pendingRemoveKey.value = null
+  }
+
+  function resetForCreate() {
+    templateId.value = ''
+    templateName.value = ''
+    templateDescription.value = ''
+    customId.value = ''
+    templateMarkdown.value = ''
+    placeholders.value = []
+    sections.value = []
+    isEditMode.value = false
+    deletedStack.value = []
+    selectedChipKey.value = null
+    pendingRemoveKey.value = null
+    localStorage.removeItem(STORAGE_KEY)
   }
 
   function pushDeleted(ph: Placeholder) {
@@ -399,13 +441,15 @@ export const useTemplateStore = defineStore('template', () => {
 
   // 自动持久化到 sessionStorage
   watch(
-    [templateMarkdown, placeholders, sections, templateName, customId],
+    [templateMarkdown, placeholders, sections, templateName, templateDescription, templateId, customId],
     () => {
       saveToStorage({
         templateMarkdown: templateMarkdown.value,
         placeholders: placeholders.value,
         sections: sections.value,
         templateName: templateName.value,
+        templateDescription: templateDescription.value,
+        templateId: templateId.value,
         customId: customId.value,
       })
     },
@@ -414,8 +458,9 @@ export const useTemplateStore = defineStore('template', () => {
 
   return {
     templateMarkdown, placeholders, sections, deletedStack,
-    selectedChipKey, selectedChipVersion, pendingRemoveKey, suppressEditorSync, templateName, customId, availableFields,
-    setUploadResult, pushDeleted, popDeleted,
+    selectedChipKey, selectedChipVersion, pendingRemoveKey, suppressEditorSync,
+    templateName, templateDescription, templateId, isEditMode, customId, availableFields,
+    setUploadResult, loadFromDetail, resetForCreate, pushDeleted, popDeleted,
     removePlaceholder, addPlaceholder, restorePlaceholder, updatePlaceholder, renamePlaceholder, selectChip,
     addPlaceholderFromOriginal, generateKey, getSectionNum, findSectionNumByOriginal, buildSubmitSections,
     normalizePlaceholderKey, comparePlaceholderKey, sortPlaceholders,

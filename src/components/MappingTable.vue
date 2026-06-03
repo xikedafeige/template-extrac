@@ -3,6 +3,8 @@
 		<div class="mapping-header">
 			<label>模板名称：</label>
 			<input v-model="store.templateName" placeholder="输入模板名称" />
+			<label>模板描述：</label>
+			<input v-model="store.templateDescription" placeholder="输入模板描述（可选）" />
 			<label>业务ID：</label>
 			<input v-model="store.customId" placeholder="可选" class="mapping-header__id" />
 		</div>
@@ -56,7 +58,7 @@
 			<span class="mapping-count">共 {{ store.placeholders.length }} 个占位符</span>
 			<button class="submit-btn" :disabled="submitting" @click="handleSubmit">
 				<i class="fa-solid" :class="submitting ? 'fa-spinner fa-spin' : 'fa-paper-plane'"></i>
-				<span>{{ submitting ? '提交中...' : '提交填充' }}</span>
+				<span>{{ submitting ? '提交中...' : submitButtonText }}</span>
 			</button>
 		</div>
 	</div>
@@ -64,6 +66,8 @@
 		<div class="mapping-header">
 			<label>模板名称：</label>
 			<input v-model="store.templateName" placeholder="输入模板名称" />
+			<label>模板描述：</label>
+			<input v-model="store.templateDescription" placeholder="输入模板描述（可选）" />
 			<label>业务ID：</label>
 			<input v-model="store.customId" placeholder="可选" class="mapping-header__id" />
 		</div>
@@ -80,13 +84,23 @@
 
 <script setup lang="ts">
 import { useTemplateStore } from '../stores/template'
-import { submitTemplate } from '../api/template'
+import { editTemplate, submitTemplate } from '../api/template'
 import { computed, watch, ref, nextTick } from 'vue'
+
+const props = defineProps<{
+	isEditMode?: boolean
+}>()
+
+const emit = defineEmits<{
+	submit: []
+	edit: []
+}>()
 
 const store = useTemplateStore()
 const listRef = ref<HTMLElement | null>(null)
 const submitting = ref(false)
 const sortedPlaceholders = computed(() => store.sortPlaceholders(store.placeholders))
+const submitButtonText = computed(() => props.isEditMode ? '保存修改' : '提交填充')
 
 watch(
 	() => [store.selectedChipKey, store.selectedChipVersion] as const,
@@ -155,20 +169,41 @@ async function handleSubmit() {
 	if (submitting.value) return
 	submitting.value = true
 	try {
+		const sections = store.buildSubmitSections()
+
+		if (props.isEditMode && store.templateId) {
+			const payload = {
+				template_id: store.templateId,
+				template_markdown: store.templateMarkdown,
+				sections,
+				template_name: store.templateName,
+				template_description: store.templateDescription,
+				custom_id: store.customId,
+			}
+			console.log('[edit payload]', payload)
+			const res = await editTemplate(payload)
+			alert(`保存成功！template_id: ${res.template_id}`)
+			console.log('[edit response]', res)
+			emit('edit')
+			return
+		}
+
 		const payload = {
 			template_markdown: store.templateMarkdown,
-			sections: store.buildSubmitSections(),
+			sections,
 			template_name: store.templateName,
-			template_description: '',
+			template_description: store.templateDescription,
 			custom_id: store.customId,
 		}
 		console.log('[submit payload]', payload)
-		return
 		const res = await submitTemplate(payload)
 		alert(`提交成功！template_id: ${res.template_id}`)
 		console.log('[submit response]', res)
+		store.templateId = res.template_id
+		store.isEditMode = true
+		emit('submit')
 	} catch (err: any) {
-		alert('提交失败: ' + (err.response?.data?.error || err.message))
+		alert('操作失败: ' + (err.response?.data?.error || err.message))
 	} finally {
 		submitting.value = false
 	}
@@ -214,7 +249,7 @@ function decodeHtmlEntities(value: string) {
 	padding: 14px 14px 12px;
 	border-bottom: 1px solid #dbe3ef;
 	display: grid;
-	grid-template-columns: auto minmax(0, 1fr) auto 118px;
+	grid-template-columns: auto minmax(0, 1fr);
 	align-items: center;
 	gap: 10px;
 	background: rgba(255, 255, 255, 0.92);
