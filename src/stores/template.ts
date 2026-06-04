@@ -270,7 +270,20 @@ export const useTemplateStore = defineStore('template', () => {
     return sectionIndex === -1 ? 0 : sectionIndex + 1
   }
 
-  // 同步替换所有 section 的 template_content 中的 key
+  // 同步替换指定 section 的 template_content 中的 key
+  function replaceSectionKey(sectionNum: number, oldKey: string, newKey: string) {
+    const re = new RegExp(`\\{\\{${oldKey}\\}\\}`, 'g')
+    sections.value = sections.value.map((sec, idx) => {
+      if (idx !== sectionNum) return sec
+      return {
+        ...sec,
+        title: typeof sec.title === 'string' ? sec.title.replace(re, `{{${newKey}}}`) : sec.title,
+        template_content: (sec.template_content || '').replace(re, `{{${newKey}}}`),
+      }
+    })
+  }
+
+  // 同步替换所有 section 的 template_content 中的 key（用于 rename）
   function replaceSectionsKey(oldKey: string, newKey: string) {
     const re = new RegExp(`\\{\\{${oldKey}\\}\\}`, 'g')
     sections.value = sections.value.map(sec => ({
@@ -283,10 +296,12 @@ export const useTemplateStore = defineStore('template', () => {
   // 同步从所有 section 的 template_content 中移除 key（还原为原文）
   function removeSectionsKey(key: string, restoreContent: string) {
     const re = new RegExp(`\\{\\{${key}\\}\\}`, 'g')
+    // 使用函数作为替换参数，避免 restoreContent 中的 $ 被当作反向引用
+    const safeReplace = (text: string) => text.replace(re, () => restoreContent)
     sections.value = sections.value.map(sec => ({
       ...sec,
-      title: typeof sec.title === 'string' ? sec.title.replace(re, restoreContent) : sec.title,
-      template_content: (sec.template_content || '').replace(re, restoreContent),
+      title: typeof sec.title === 'string' ? safeReplace(sec.title) : sec.title,
+      template_content: safeReplace(sec.template_content || ''),
     }))
   }
 
@@ -328,59 +343,63 @@ export const useTemplateStore = defineStore('template', () => {
 
   // 删除后重排该章节内所有 key 的序号
   function removePlaceholder(key: string) {
+    console.log('[removePlaceholder] called with key=', key)
     const ph = placeholders.value.find(p => p.key === key)
+    console.log('[removePlaceholder] found ph=', ph)
     if (!ph) return
 
     pushDeleted({ ...ph })
+    console.log('[removePlaceholder] after pushDeleted, deletedStack length=', deletedStack.value.length)
     pendingRemoveKey.value = key
-
-    // 把 {{key}} 替换为添加占位符前的内容，优先保留原 HTML 格式。
-    const restoreContent = getPlaceholderRestoreContent(ph)
-    const re = new RegExp(`\\{\\{${key}\\}\\}`, 'g')
-    templateMarkdown.value = templateMarkdown.value.replace(re, restoreContent)
-    removeSectionsKey(key, restoreContent)
-    placeholders.value = placeholders.value.filter(p => p.key !== key)
-
-    // 提取章节号
-    const m = key.match(/^key_(\d+)_\d+_md$/)
-    if (m) {
-      reindexSection(parseInt(m[1]))
-    }
-
-    placeholders.value = sortPlaceholders(placeholders.value)
+    console.log('[removePlaceholder] set pendingRemoveKey to', key)
+    // 注意：pendingRemoveKey 由 TemplateEditor.vue 的 pendingRemoveKey watcher 处理。
+    // 该 watcher 会：
+    // 1. 精确替换 DOM 中的 chip 节点为原文
+    // 2. 同步更新 store.templateMarkdown 和 sections.template_content
+    // 3. 执行 reindexSection 核心逻辑（同步，不触发 structural watcher）
+    // 4. 更新 DOM 中被 reindex 重命名的 key 属性
+    // 5. 设置 suppressNextStructuralRebuild = true
+    // 因此这里只需要保存 deleted stack + 设置 pendingRemoveKey
     if (selectedChipKey.value === key) {
       selectChip(null)
     }
   }
 
   // 对指定章节内的 key 按在对应 section 的 template_content 中出现的顺序重新编号
+  // 使用两阶段重命名（先临时key，再最终key），避免碰撞导致错误替换
   function reindexSection(sectionNum: number) {
     const prefix = `key_${sectionNum}_`
-    // sectionNum 直接对应 sections 数组索引
     const section = sections.value[sectionNum]
     const referenceText = section
       ? `${section.title || ''}\n${section.template_content || ''}`
       : templateMarkdown.value
 
-    // 找出该章节所有 key，按在 referenceText 中出现的位置排序
     const sectionPhs = placeholders.value
       .filter(p => p.key.startsWith(prefix) && p.key.endsWith('_md'))
       .map(p => ({ ph: p, pos: referenceText.indexOf(`{{${p.key}}}`) }))
       .filter(item => item.pos >= 0)
       .sort((a, b) => a.pos - b.pos)
 
-    let idx = 1
-    for (const { ph } of sectionPhs) {
-      const newKey = `key_${sectionNum}_${idx}_md`
-      if (ph.key !== newKey) {
-        templateMarkdown.value = templateMarkdown.value.replace(
-          new RegExp(`\\{\\{${ph.key}\\}\\}`, 'g'),
-          `{{${newKey}}}`
-        )
-        replaceSectionsKey(ph.key, newKey)
-        ph.key = newKey
-      }
-      idx++
+    // Phase 1: 全部重命名为临时 key，避免碰撞
+    const tmpKeys: string[] = []
+    for (let i = 0; i < sectionPhs.length; i++) {
+      const { ph } = sectionPhs[i]
+      const tmpKey = `__tmp_reindex_${sectionNum}_${i}__`
+      tmpKeys.push(tmpKey)
+      const tmpRe = new RegExp(`\\{\\{${ph.key}\\}\\}`, 'g')
+      templateMarkdown.value = templateMarkdown.value.replace(tmpRe, `{{${tmpKey}}}`)
+      replaceSectionKey(sectionNum, ph.key, tmpKey)
+    }
+
+    // Phase 2: 临时 key → 最终 key
+    for (let i = 0; i < sectionPhs.length; i++) {
+      const { ph } = sectionPhs[i]
+      const newKey = `key_${sectionNum}_${i + 1}_md`
+      const tmpKey = tmpKeys[i]
+      const tmpRe = new RegExp(`\\{\\{${tmpKey}\\}\\}`, 'g')
+      templateMarkdown.value = templateMarkdown.value.replace(tmpRe, `{{${newKey}}}`)
+      replaceSectionKey(sectionNum, tmpKey, newKey)
+      ph.key = newKey
     }
 
     placeholders.value = sortPlaceholders(placeholders.value)
@@ -393,8 +412,8 @@ export const useTemplateStore = defineStore('template', () => {
   function restorePlaceholder(ph: Placeholder) {
     const normalizedPh = { ...ph, key: normalizePlaceholderKey(ph.key) }
     const token = `{{${normalizedPh.key}}}`
-    templateMarkdown.value = replaceFirst(templateMarkdown.value, normalizedPh.original, token)
 
+    // 优先在 sections.template_content 中查找并替换第一个匹配项
     const sectionNum = parseSectionNumFromKey(normalizedPh.key)
     const preferredIndex = sectionNum !== null ? sectionNum : -1
     const preferredSection = sections.value[preferredIndex]
@@ -416,6 +435,11 @@ export const useTemplateStore = defineStore('template', () => {
         template_content: replaceFirst(templateContent, normalizedPh.original, token),
       }
     })
+
+    // 如果 sections 中没有找到匹配的原文（已被删除或文本有变化），尝试在 templateMarkdown 中替换
+    if (!replaced) {
+      templateMarkdown.value = replaceFirst(templateMarkdown.value, normalizedPh.original, token)
+    }
 
     addPlaceholder(normalizedPh)
     selectChip(normalizedPh.key)
@@ -533,6 +557,6 @@ export const useTemplateStore = defineStore('template', () => {
     setUploadResult, loadFromDetail, resetForCreate, pushDeleted, popDeleted,
     removePlaceholder, addPlaceholder, restorePlaceholder, updatePlaceholder, renamePlaceholder, selectChip,
     addPlaceholderFromOriginal, generateKey, getSectionNum, findSectionNumByOriginal, buildSubmitSections,
-    normalizePlaceholderKey, comparePlaceholderKey, sortPlaceholders,
+    normalizePlaceholderKey, comparePlaceholderKey, sortPlaceholders, reindexSection,
   }
 })

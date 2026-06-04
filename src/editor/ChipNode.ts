@@ -76,6 +76,12 @@ export const ChipNode = Node.create({
     return [{ tag: 'span[data-chip]' }]
   },
 
+  // parseHTML 正确读取 data-original，使得 ChipNode 节点实例持有原始文本属性，
+  // 与 data-* DOM 属性保持一致。这样在用户手动编辑 chip 周围文本后，
+  // TipTap 序列化节点时能拿到准确的 original 值，而不是依赖全局 phMap 回退。
+  // 配合 TemplateEditor 中 reindex 的两阶段临时 key 方案，
+  // 即使其他节点 key 变化，已编辑 chip 的 original 内容也不会受影响。
+
   renderHTML({ HTMLAttributes }) {
     const typeClass = (TYPE_CLASSES as Record<string, string>)[HTMLAttributes.type] || ''
     return [

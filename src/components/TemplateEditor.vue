@@ -49,7 +49,8 @@ const tablePattern = /<table\b[\s\S]*?<\/table>/gi
 
 const store = useTemplateStore()
 const hasSelection = ref(false)
-let skipNextSync = false
+// Per-operation suppression flag - reset after each rebuild, unlike the old global skipNextSync
+let suppressNextStructuralRebuild = false
 let editorReady = false
 let preserveClickedSelection = false
 let syncDebounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -59,7 +60,7 @@ function debouncedSyncSections() {
 	if (syncDebounceTimer !== null) clearTimeout(syncDebounceTimer)
 	syncDebounceTimer = setTimeout(() => {
 		syncDebounceTimer = null
-		skipNextSync = true
+		suppressNextStructuralRebuild = true
 		syncSectionsFromEditor()
 	}, 300)
 }
@@ -238,31 +239,183 @@ function getClickedPlaceholderKey(target: EventTarget | null): string | null {
 	return placeholder.dataset.key || placeholder.dataset.chipKey || null
 }
 
+// 精确替换被删除的占位符节点，并在同一个 watcher 中同步更新 store（templateMarkdown、sections.template_content）。
+// 关键执行顺序：
+//  1. 保存 restoreText（避免 deletedStack 竞态）
+//  2. 查找 ProseMirror 中的 chip 位置
+//  3. 【立即】设置 suppressNextStructuralRebuild=true（阻止后续 structural watcher 触发 setContent）
+//  4. 更新 store（remove key + reindex）
+//  5. 调度 ProseMirror transaction
+//  这样 Vue 响应式 watcher 只在所有操作完成后才执行，且 suppressNextStructuralRebuild 已为 true。
+watch(
+	() => store.pendingRemoveKey,
+	(removedKey) => {
+		if (!removedKey || !editorReady || !editor.value) {
+			return
+		}
+
+		// Step 0: 立即保存 restoreText（必须在 store 操作之前，避免 deletedStack 被后续删除覆盖）
+		const deletedPh = store.deletedStack[store.deletedStack.length - 1]
+		const restoreText = deletedPh?.originalHtml?.trim() || deletedPh?.original || ''
+
+		// Step 1: 在当前 DOM 中查找 chip 位置（用当前 ProseMirror 文档）
+		const view = editor.value.view
+		const doc = view.state.doc
+		let targetPos = -1
+		let targetNodeSize = 0
+		let isChip = false
+
+		doc.descendants((node, pos) => {
+			if (targetPos >= 0) return false
+			if (node.type.name === 'chip' && node.attrs.key === removedKey) {
+				targetPos = pos
+				targetNodeSize = node.nodeSize
+				isChip = true
+				return false
+			}
+			if (node.type.name === 'htmlBlock' && node.attrs.chipKey === removedKey) {
+				targetPos = pos
+				targetNodeSize = node.nodeSize
+				return false
+			}
+			return true
+		})
+
+		// Step 2: 【立即】设置 suppressNextStructuralRebuild=true，在所有 store 操作之前。
+		//         这样当 Step 3 的 store 赋值触发 Vue 响应式 watcher 时，它们看到的是 true。
+		suppressNextStructuralRebuild = true
+
+		// Step 3: 更新 store（会触发 Vue watcher，但因为 suppressNextStructuralRebuild=true 而被跳过）
+		// 直接过滤，store.sortPlaceholders 由 store 内部处理（addPlaceholder/updatePlaceholder 会自动排序）
+		store.placeholders = store.placeholders.filter(p => p.key !== removedKey)
+
+		const m = removedKey.match(/^key_(\d+)_\d+_md$/)
+		if (m) {
+			const sectionNum = parseInt(m[1], 10)
+			store.reindexSection(sectionNum)
+		}
+
+		// Step 4: 【最后】调度 ProseMirror transaction（DOM 替换在 store 更新之后）
+		isSettingContent = true
+		try {
+			if (targetPos >= 0) {
+				if (isChip) {
+					const tr = view.state.tr.replaceWith(
+						targetPos,
+						targetPos + targetNodeSize,
+						view.state.schema.text(restoreText)
+					)
+					view.dispatch(tr)
+				} else {
+					const tempDiv = document.createElement('div')
+					tempDiv.innerHTML = restoreText
+					const plainText = tempDiv.textContent || tempDiv.innerText || restoreText
+					const tr = view.state.tr.replaceWith(
+						targetPos,
+						targetPos + targetNodeSize,
+						view.state.schema.text(plainText)
+					)
+					view.dispatch(tr)
+				}
+			}
+
+			// Step 5: 更新被 reindex 重命名的其他 key 的 DOM 属性
+			updateReindexedDomKeys()
+		} finally {
+			isSettingContent = false
+			store.pendingRemoveKey = null
+		}
+	}
+)
+
+// 将 store 中 reindex 后的 key 同步更新到编辑器 DOM 上
+// 不触发 setContent，只修改节点属性
+// 核心逻辑：从 markdown 原文按文档顺序提取 key（reindex 后已是最新的），
+// 与 DOM 中实际节点按相同顺序一一对应，找出并修正不匹配的节点。
+function updateReindexedDomKeys() {
+	if (!editor.value) return
+	const view = editor.value.view
+	const doc = view.state.doc
+
+	// 从 markdown 原文按文档顺序提取 key（reindex 后已是最新的）
+	const allMdText = store.templateMarkdown
+	const mdKeysInDocOrder: string[] = []
+	const mdKeyRe = /\{\{([\w]+)\}\}/g
+	let match
+	while ((match = mdKeyRe.exec(allMdText)) !== null) {
+		if (!mdKeysInDocOrder.includes(match[1])) mdKeysInDocOrder.push(match[1])
+	}
+
+	// 从 DOM 中按文档顺序收集 chip/htmlBlock 的 key（仅限 key_格式）
+	const domKeysInDocOrder: Array<{ key: string; pos: number; nodeType: string }> = []
+	doc.descendants((node, pos) => {
+		if (node.type.name === 'chip') {
+			const k = node.attrs.key as string
+			if (/^key_\d+_/.test(k)) domKeysInDocOrder.push({ key: k, pos, nodeType: 'chip' })
+		} else if (node.type.name === 'htmlBlock') {
+			const k = node.attrs.chipKey as string
+			if (/^key_\d+_/.test(k)) domKeysInDocOrder.push({ key: k, pos, nodeType: 'htmlBlock' })
+		}
+		return true
+	})
+
+	// 找出 DOM 中与 markdown 不一致的节点
+	const mismatches: Array<{ domKey: string; expectedKey: string; pos: number; nodeType: string }> = []
+	for (let i = 0; i < domKeysInDocOrder.length; i++) {
+		const dom = domKeysInDocOrder[i]
+		const expected = mdKeysInDocOrder[i]
+		if (dom.key !== expected) {
+			mismatches.push({ domKey: dom.key, expectedKey: expected, pos: dom.pos, nodeType: dom.nodeType })
+		}
+	}
+
+	if (mismatches.length === 0) return
+
+	// 从后往前重命名（避免前面的位置被覆盖导致后续映射错位）
+	const tr = view.state.tr
+	for (let i = mismatches.length - 1; i >= 0; i--) {
+		const { domKey, expectedKey, pos, nodeType } = mismatches[i]
+		if (!expectedKey) continue
+		const node = doc.nodeAt(pos)
+		if (node) {
+			if (nodeType === 'chip') {
+				tr.setNodeMarkup(pos, undefined, { ...node.attrs, key: expectedKey })
+			} else {
+				tr.setNodeMarkup(pos, undefined, { ...node.attrs, chipKey: expectedKey })
+			}
+		}
+	}
+
+	view.dispatch(tr)
+}
+
 // 只在结构性内容变化时重建编辑器（templateMarkdown、sections 的 template_content、以及占位符的 key/original 集合）
 // 不在 prompt/field 等元数据变化时重建，避免覆盖编辑器内已有内容
+// 注意：pendingRemoveKey 的处理由上面的精确替换 watcher 负责，不再触发全量重建
 watch(
 	() => {
 		const mdKey = store.templateMarkdown
 		const sectionsKey = store.sections.map(s => s.template_content || '').join('\x00')
 		const placeholderStructureKey = store.placeholders.map(p => `${p.key}:${p.original}:${p.originalHtml || ''}`).join('|')
-		return mdKey + '\x01' + sectionsKey + '\x01' + placeholderStructureKey + '\x01' + (store.pendingRemoveKey || '')
+		return mdKey + '\x01' + sectionsKey + '\x01' + placeholderStructureKey
 	},
 	() => {
 		if (!editorReady || !editor.value || !store.templateMarkdown) return
-		const forceRebuild = Boolean(store.pendingRemoveKey)
-		if (skipNextSync && !forceRebuild) {
-			skipNextSync = false
+		if (isSettingContent) return
+		if (suppressNextStructuralRebuild) {
+			suppressNextStructuralRebuild = false
 			return
 		}
-		skipNextSync = false
+		// pendingRemoveKey 不为 null 时（删除 chip 流程中），pendingRemoveKey watcher 会负责
+		// 精确的 DOM 替换，不需要 setContent 重建。
+		if (store.pendingRemoveKey !== null) {
+			return
+		}
 		isSettingContent = true
 		editor.value.commands.setContent(buildEditorHtml())
 		nextTick(() => {
 			isSettingContent = false
 			scanChips(editor.value!)
-			if (forceRebuild) {
-				store.pendingRemoveKey = null
-			}
 		})
 	},
 )
@@ -309,8 +462,27 @@ function buildEditorHtml(): string {
 				const shouldRenderTitle = Boolean(titleKey) && !usedTitles.has(titleKey)
 				if (titleKey) usedTitles.add(titleKey)
 				const source = section.template_content || section.content || ''
+				// 标题也需要处理 {{key}} 占位符高亮
+				const renderedTitle = shouldRenderTitle
+					? (() => {
+						const phMap = new Map(store.placeholders.map(p => [p.key, p]))
+						return `<h2>${title.replace(/\{\{([\w]+)\}\}/g, (_, key) => {
+							const ph = phMap.get(key)
+							if (!ph) return `{{${key}}}`
+							const position = formatKeyPosition(key)
+							const chipTitle = position ? `${position} | key: ${key}` : `key: ${key}`
+							const cls = ph.type === 'TYPE_FILL' ? 'chip--TYPE_FILL' : 'chip--TYPE_DESCRIPTION'
+							const hasTable = /<table\b[\s\S]*?<\/table>/i.test(decodeHtmlEntities(ph.original || ''))
+							if (hasTable) {
+								const encoded = btoa(encodeURIComponent(ph.original || ''))
+								return `<div data-html-block="" data-html-encoded="${encoded}" data-chip-type="${ph.type}" data-chip-key="${key}" draggable="false"></div>`
+							}
+							return `<span data-chip="" data-key="${key}" data-original="${escapeAttr(ph.original || key)}" data-type="${ph.type}" data-fill_mode="${ph.fill_mode}" data-field="${ph.field || ''}" data-prompt="${escapeAttr(ph.prompt || '')}" data-note="${escapeAttr(ph.note || '')}" class="chip ${cls}" title="${escapeAttr(chipTitle)}" draggable="false">${escapeHtml(ph.original || key)}</span>`
+						})}</h2>`
+					})()
+					: ''
 				const inner = [
-					shouldRenderTitle ? `<h2>${escapeHtml(title)}</h2>` : '',
+					renderedTitle,
 					markdownToHtml(source, store.placeholders),
 				].join('')
 				return `<div data-section-index="${index}">${inner}</div>`
@@ -351,7 +523,9 @@ function markdownToHtml(mdText: string, placeholders: any[]): string {
 
 	function makeChipHtml(key: string): string {
 		const ph = phMap.get(key)
-		if (!ph) return `{{${key}}}`
+		if (!ph) {
+			return `{{${key}}}`
+		}
 
 		// 优先使用 originalHtml（包含表格的完整 HTML）
 		const htmlContent = ph.originalHtml || ph.original
@@ -538,6 +712,8 @@ function getSectionIndexFromSelection(): number {
 }
 
 // 从编辑器文档中重建每个 section 的 template_content 和 placeholders
+// 重要：保留 section.content（原文档中的原文），不覆盖用户可能已编辑过的 content。
+// template_content 反映编辑器中 chip/{{key}} 的当前状态。
 function syncSectionsFromEditor() {
 	if (!editor.value || !store.sections.length) return
 	const doc = editor.value.state.doc
@@ -553,9 +729,19 @@ function syncSectionsFromEditor() {
 
 		// 遍历 section 节点下的顶层块节点
 		node.forEach((block) => {
-			// 提取 heading 文本作为 title
+			// 提取 heading 内容（保留 {{key}} 占位符）
 			if (block.type.name === 'heading') {
-				sectionTitle = block.textContent || ''
+				const titleParts: string[] = []
+				block.descendants((child) => {
+					if (child.type.name === 'chip') {
+						const key = child.attrs.key || ''
+						if (key) titleParts.push(`{{${key}}}`)
+						return false
+					}
+					if (child.isText) titleParts.push(child.text || '')
+					return true
+				})
+				sectionTitle = titleParts.join('')
 				return
 			}
 
@@ -603,11 +789,13 @@ function syncSectionsFromEditor() {
 			return phMap.get(key)?.original || `{{${key}}}`
 		})
 
+		const originalSection = store.sections[sectionIndex]
 		store.sections[sectionIndex] = {
-			...store.sections[sectionIndex],
+			...originalSection,
 			...(sectionTitle !== null ? { title: sectionTitle } : {}),
 			template_content: newTemplateContent,
-			content: newContent,
+			// 仅当 newContent 与当前 content 不同时才更新（允许用户在 section.content 中做额外编辑）
+			content: newContent !== originalSection.content ? newContent : originalSection.content,
 		}
 	})
 
@@ -660,7 +848,7 @@ function addChipFromSelection() {
 			note: '',
 		}).run()
 
-		skipNextSync = true
+		suppressNextStructuralRebuild = true
 		store.addPlaceholder({
 			key,
 			original: tableHtml,
@@ -695,7 +883,7 @@ function addChipFromSelection() {
 		note: '',
 	}).run()
 
-	skipNextSync = true
+	suppressNextStructuralRebuild = true
 	store.addPlaceholder({
 		key,
 		original: selectedContent,

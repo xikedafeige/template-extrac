@@ -13,7 +13,7 @@
 			<input ref="fileInput" type="file" accept=".docx" class="topbar-file-input" @change="handleFile" />
 			<button class="upload-btn" :class="{ parsing: loading }" :disabled="loading" @click="openFilePicker">
 				<i class="fa-solid" :class="loading ? 'fa-spinner fa-spin' : 'fa-upload'"></i>
-				<span>{{ loading ? '解析中...' : '上传 Word 模板' }}</span>
+				<span>{{ uploadBtnText }}</span>
 			</button>
 			<span v-if="fileName" class="file-name">{{ fileName }}</span>
 		</template>
@@ -46,7 +46,15 @@ const topbarTitle = computed(() => {
 	return store.templateName || '编辑模板'
 })
 
+const uploadBtnText = computed(() => {
+	if (loading.value) return '解析中...'
+	return props.mode === 'edit' ? '重新上传 Word' : '上传 Word 模板'
+})
+
 function openFilePicker() {
+	if (props.mode === 'edit' && store.placeholders.length) {
+		if (!confirm('重新上传 Word 将覆盖当前已编辑的内容，确定继续？')) return
+	}
 	fileInput.value?.click()
 }
 
