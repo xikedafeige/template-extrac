@@ -80,6 +80,64 @@ function sortPlaceholders(phs: Placeholder[]): Placeholder[] {
   return [...phs].sort((a, b) => comparePlaceholderKey(a.key, b.key))
 }
 
+function createFallbackPlaceholder(key: string): Placeholder {
+  return {
+    key,
+    original: key,
+    type: 'TYPE_DESCRIPTION',
+    fill_mode: 'newline',
+    field: null,
+    prompt: null,
+  }
+}
+
+function extractPlaceholderKeysFromText(value?: string | null): string[] {
+  const seen = new Set<string>()
+  const keys: string[] = []
+  const text = value || ''
+  for (const match of text.matchAll(/\{\{\s*([^{}\s]+)\s*\}\}/g)) {
+    const key = normalizePlaceholderKey(match[1] || '')
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    keys.push(key)
+  }
+  return keys
+}
+
+function getSectionPlaceholderKeys(sec: Pick<Section, 'title' | 'template_content'>): string[] {
+  return extractPlaceholderKeysFromText(`${sec.title || ''}\n${sec.template_content || ''}`)
+}
+
+function normalizePlaceholder(ph: Placeholder): Placeholder {
+  return { ...ph, key: normalizePlaceholderKey(ph.key) }
+}
+
+function mergePlaceholdersWithSectionKeys(phs: Placeholder[], secs: Section[]): Placeholder[] {
+  const phMap = new Map<string, Placeholder>()
+  for (const ph of phs) {
+    const normalized = normalizePlaceholder(ph)
+    if (normalized.key && !phMap.has(normalized.key)) {
+      phMap.set(normalized.key, normalized)
+    }
+  }
+  for (const sec of secs) {
+    for (const key of getSectionPlaceholderKeys(sec)) {
+      if (!phMap.has(key)) {
+        phMap.set(key, createFallbackPlaceholder(key))
+      }
+    }
+  }
+  return sortPlaceholders([...phMap.values()])
+}
+
+function syncSectionPlaceholders(secs: Section[], phs: Placeholder[]): Section[] {
+  const phMap = new Map(phs.map(ph => [normalizePlaceholderKey(ph.key), ph]))
+  return secs.map(sec => ({
+    ...sec,
+    placeholders: getSectionPlaceholderKeys(sec).map(key => phMap.get(key) || createFallbackPlaceholder(key)),
+  }))
+}
+
 function replaceFirst(source: string, search: string, replacement: string): string {
   if (!search) return source
   const index = source.indexOf(search)
@@ -111,9 +169,14 @@ export const useTemplateStore = defineStore('template', () => {
   ])
 
   function setUploadResult(md: string, phs: Placeholder[], secs: Section[]) {
+    const nextSections = secs || []
+    const nextPlaceholders = mergePlaceholdersWithSectionKeys(
+      [...(phs || []), ...nextSections.flatMap(sec => sec.placeholders || [])],
+      nextSections
+    )
     templateMarkdown.value = md
-    placeholders.value = sortPlaceholders(phs)
-    sections.value = secs
+    placeholders.value = nextPlaceholders
+    sections.value = syncSectionPlaceholders(nextSections, nextPlaceholders)
     deletedStack.value = []
     selectedChipKey.value = null
   }
@@ -124,10 +187,13 @@ export const useTemplateStore = defineStore('template', () => {
     templateDescription.value = data.template_description || ''
     customId.value = data.custom_id || ''
     templateMarkdown.value = data.template_markdown || ''
-    sections.value = data.sections || []
-    placeholders.value = sortPlaceholders(
-      sections.value.flatMap(sec => sec.placeholders || [])
+    const nextSections = data.sections || []
+    const nextPlaceholders = mergePlaceholdersWithSectionKeys(
+      nextSections.flatMap(sec => sec.placeholders || []),
+      nextSections
     )
+    sections.value = syncSectionPlaceholders(nextSections, nextPlaceholders)
+    placeholders.value = nextPlaceholders
     isEditMode.value = true
     deletedStack.value = []
     selectedChipKey.value = null
@@ -162,12 +228,16 @@ export const useTemplateStore = defineStore('template', () => {
 
   // 根据章节号获取该章节内已有 key 的最大 index
   function getNextKeyIndex(sectionNum: number): number {
-    const prefix = `key_${sectionNum}_`
+    const keys = new Set(placeholders.value.map(ph => normalizePlaceholderKey(ph.key)))
+    const section = sections.value[sectionNum]
+    if (section) {
+      getSectionPlaceholderKeys(section).forEach(key => keys.add(key))
+    }
     let maxIdx = 0
-    for (const ph of placeholders.value) {
-      if (ph.key.startsWith(prefix)) {
-        const m = ph.key.match(/^key_\d+_(\d+)_md$/)
-        if (m) maxIdx = Math.max(maxIdx, parseInt(m[1]))
+    for (const key of keys) {
+      const parts = parseKeyParts(key)
+      if (parts?.section === sectionNum && parts.suffix === 'md') {
+        maxIdx = Math.max(maxIdx, parts.index)
       }
     }
     return maxIdx + 1
@@ -205,6 +275,7 @@ export const useTemplateStore = defineStore('template', () => {
     const re = new RegExp(`\\{\\{${oldKey}\\}\\}`, 'g')
     sections.value = sections.value.map(sec => ({
       ...sec,
+      title: typeof sec.title === 'string' ? sec.title.replace(re, `{{${newKey}}}`) : sec.title,
       template_content: (sec.template_content || '').replace(re, `{{${newKey}}}`),
     }))
   }
@@ -214,6 +285,7 @@ export const useTemplateStore = defineStore('template', () => {
     const re = new RegExp(`\\{\\{${key}\\}\\}`, 'g')
     sections.value = sections.value.map(sec => ({
       ...sec,
+      title: typeof sec.title === 'string' ? sec.title.replace(re, restoreContent) : sec.title,
       template_content: (sec.template_content || '').replace(re, restoreContent),
     }))
   }
@@ -286,12 +358,15 @@ export const useTemplateStore = defineStore('template', () => {
     const prefix = `key_${sectionNum}_`
     // sectionNum 直接对应 sections 数组索引
     const section = sections.value[sectionNum]
-    const referenceText = section?.template_content || templateMarkdown.value
+    const referenceText = section
+      ? `${section.title || ''}\n${section.template_content || ''}`
+      : templateMarkdown.value
 
     // 找出该章节所有 key，按在 referenceText 中出现的位置排序
     const sectionPhs = placeholders.value
       .filter(p => p.key.startsWith(prefix) && p.key.endsWith('_md'))
       .map(p => ({ ph: p, pos: referenceText.indexOf(`{{${p.key}}}`) }))
+      .filter(item => item.pos >= 0)
       .sort((a, b) => a.pos - b.pos)
 
     let idx = 1
@@ -378,17 +453,12 @@ export const useTemplateStore = defineStore('template', () => {
 
   // 构造 submit 用的 sections 数组
   function buildSubmitSections(): SubmitSection[] {
-    const phMap = new Map(placeholders.value.map(p => [p.key, p]))
+    const phMap = new Map(placeholders.value.map(p => [normalizePlaceholderKey(p.key), p]))
 
     // 用后端返回的 sections 作为基础结构，通过 title 和 template_content 中实际出现的 {{key}} 来匹配
     return sections.value.map((sec) => {
-      const titleText = sec.title || ''
-      const templateContent = sec.template_content || ''
-      const combinedText = titleText + '\n' + templateContent
-      const matchedKeys = [...combinedText.matchAll(/\{\{([\w]+)\}\}/g)].map(m => m[1])
-      const secPhs = matchedKeys
-        .map(key => phMap.get(key))
-        .filter((ph): ph is Placeholder => ph !== undefined)
+      const matchedKeys = getSectionPlaceholderKeys(sec)
+      const secPhs = matchedKeys.map(key => phMap.get(key) || createFallbackPlaceholder(key))
 
       return {
         title: sec.title,
