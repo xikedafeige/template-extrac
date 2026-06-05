@@ -7,6 +7,8 @@ import type {
   UploadResponse,
   SubmitRequest,
   SubmitResponse,
+  GeneratePromptRequest,
+  GeneratePromptResponse,
 } from '../types/template'
 
 const api = axios.create()
@@ -49,5 +51,15 @@ export async function listTemplates(page = 1, pageSize = 20): Promise<ListRespon
 
 export async function deleteTemplate(templateId: string): Promise<DeleteResponse> {
   const { data } = await api.delete<DeleteResponse>(`/api/template/delete/${templateId}`)
+  return data
+}
+
+export async function generatePlaceholderPrompt(
+  req: GeneratePromptRequest,
+): Promise<GeneratePromptResponse> {
+  const { data } = await api.post<GeneratePromptResponse>(
+    '/api/template/generate-prompt',
+    req,
+  )
   return data
 }

@@ -45,6 +45,10 @@
 					<label>提示词：</label>
 					<textarea :value="ph.prompt || ''" @input="updatePrompt(ph.key, ($event.target as HTMLTextAreaElement).value)"
 						rows="2" />
+					<button class="generate-prompt-btn" :disabled="generatingKey === ph.key" @click.stop="generatePrompt(ph.key)">
+						<i class="fa-solid" :class="generatingKey === ph.key ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'"></i>
+						{{ generatingKey === ph.key ? '生成中...' : 'AI 生成' }}
+					</button>
 				</div>
 
 				<div class="mapping-actions">
@@ -84,7 +88,7 @@
 
 <script setup lang="ts">
 import { useTemplateStore } from '../stores/template'
-import { editTemplate, submitTemplate } from '../api/template'
+import { editTemplate, submitTemplate, generatePlaceholderPrompt } from '../api/template'
 import { computed, watch, ref, nextTick } from 'vue'
 
 const props = defineProps<{
@@ -99,6 +103,7 @@ const emit = defineEmits<{
 const store = useTemplateStore()
 const listRef = ref<HTMLElement | null>(null)
 const submitting = ref(false)
+const generatingKey = ref<string | null>(null)
 const sortedPlaceholders = computed(() => store.sortPlaceholders(store.placeholders))
 const submitButtonText = computed(() => props.isEditMode ? '保存修改' : '提交填充')
 
@@ -135,6 +140,48 @@ function updateField(key: string, value: string) {
 
 function updatePrompt(key: string, value: string) {
 	store.updatePlaceholder(key, { prompt: value || null })
+}
+
+async function generatePrompt(key: string) {
+	if (generatingKey.value) return
+	const ph = store.placeholders.find(p => p.key === key)
+	if (!ph) return
+
+	generatingKey.value = key
+	try {
+		// 构建 template_content：标题 + template_content 拼接，保留 {{key}} 以便后续替换
+		const phMap = new Map(store.placeholders.map(p => [p.key, p]))
+		const mdParts: string[] = []
+		for (const sec of store.sections) {
+			if (sec.title) mdParts.push(sec.title)
+			if (sec.template_content) mdParts.push(sec.template_content)
+		}
+		const allTemplateContent = mdParts.join('\n\n')
+
+		// 除了当前 key 外，其他 {{key}} 都替换为原文
+		const contextWithOriginals = allTemplateContent.replace(
+			/\{\{([\w]+)\}\}/g,
+			(_, k) => {
+				if (k === key) return `{{${k}}}`
+				return phMap.get(k)?.original ?? `{{${k}}}`
+			}
+		)
+
+		const res = await generatePlaceholderPrompt({
+			placeholder_key: key,
+			text_fragment: ph.original || '',
+			template_content: contextWithOriginals,
+		})
+
+		if (res.success && res.generated_prompt) {
+			store.updatePlaceholder(key, { prompt: res.generated_prompt })
+		}
+	} catch (err) {
+		console.error('[generatePrompt] error:', err)
+		alert('生成提示词失败，请重试')
+	} finally {
+		generatingKey.value = null
+	}
 }
 
 function changeType(key: string) {
@@ -424,6 +471,31 @@ function decodeHtmlEntities(value: string) {
 	font-size: 13px;
 	line-height: 1.5;
 	resize: vertical;
+}
+
+.generate-prompt-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	margin-top: 6px;
+	padding: 4px 10px;
+	font-size: 12px;
+	border: 1px solid #a78bfa;
+	border-radius: 6px;
+	background: #f5f3ff;
+	color: #7c3aed;
+	cursor: pointer;
+	transition: all 0.15s;
+}
+
+.generate-prompt-btn:hover:not(:disabled) {
+	background: #ede9fe;
+	border-color: #7c3aed;
+}
+
+.generate-prompt-btn:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
 }
 
 .mapping-actions {

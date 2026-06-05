@@ -102,3 +102,15 @@ export interface DeleteResponse {
   code: number
   message: string
 }
+
+export interface GeneratePromptRequest {
+  placeholder_key: string
+  text_fragment: string
+  template_content: string
+  extra_prompt?: string
+}
+
+export interface GeneratePromptResponse {
+  success: boolean
+  generated_prompt: string
+}

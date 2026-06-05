@@ -289,15 +289,25 @@ watch(
 		// 直接过滤，store.sortPlaceholders 由 store 内部处理（addPlaceholder/updatePlaceholder 会自动排序）
 		store.placeholders = store.placeholders.filter(p => p.key !== removedKey)
 
+		// Step 3.5: 从 templateMarkdown 和 section.template_content 中移除被删 key 的令牌
+		// 必须在 reindexSection 之前执行，否则 reindex 后会出现重复的 {{key}} 令牌
+		const removeRe = new RegExp(`\\{\\{${removedKey}\\}\\}`, 'g')
+		const restoreOriginal = deletedPh?.original || ''
+		store.templateMarkdown = store.templateMarkdown.replace(removeRe, () => restoreOriginal)
+		store.sections = store.sections.map(sec => ({
+			...sec,
+			title: typeof sec.title === 'string' ? sec.title.replace(removeRe, () => restoreOriginal) : sec.title,
+			template_content: (sec.template_content || '').replace(removeRe, () => restoreOriginal),
+		}))
+
 		const m = removedKey.match(/^key_(\d+)_\d+_md$/)
+		const sectionNum = m ? parseInt(m[1], 10) : -1
 		if (m) {
-			const sectionNum = parseInt(m[1], 10)
 			store.reindexSection(sectionNum)
 		}
-
-		// Step 4: 【最后】调度 ProseMirror transaction（DOM 替换在 store 更新之后）
 		isSettingContent = true
 		try {
+			// Step 4: 先从 DOM 移除被删除的 chip 节点
 			if (targetPos >= 0) {
 				if (isChip) {
 					const tr = view.state.tr.replaceWith(
@@ -319,8 +329,10 @@ watch(
 				}
 			}
 
-			// Step 5: 更新被 reindex 重命名的其他 key 的 DOM 属性
-			updateReindexedDomKeys()
+			// Step 5: chip 已移除，现在更新剩余 chip 的 key 属性（索引对位正确）
+			if (sectionNum >= 0) {
+				updateReindexedDomKeys(sectionNum)
+			}
 		} finally {
 			isSettingContent = false
 			store.pendingRemoveKey = null
@@ -330,51 +342,56 @@ watch(
 
 // 将 store 中 reindex 后的 key 同步更新到编辑器 DOM 上
 // 不触发 setContent，只修改节点属性
-// 核心逻辑：从 markdown 原文按文档顺序提取 key（reindex 后已是最新的），
-// 与 DOM 中实际节点按相同顺序一一对应，找出并修正不匹配的节点。
-function updateReindexedDomKeys() {
+// 更新被 reindex 重命名的 key 到编辑器 DOM 上（仅限指定章节）
+// 权威来源：store.sections[sectionNum].placeholders（reindex 后已是最新的）
+function updateReindexedDomKeys(sectionNum: number) {
 	if (!editor.value) return
 	const view = editor.value.view
 	const doc = view.state.doc
 
-	// 从 markdown 原文按文档顺序提取 key（reindex 后已是最新的）
-	const allMdText = store.templateMarkdown
-	const mdKeysInDocOrder: string[] = []
-	const mdKeyRe = /\{\{([\w]+)\}\}/g
-	let match
-	while ((match = mdKeyRe.exec(allMdText)) !== null) {
-		if (!mdKeysInDocOrder.includes(match[1])) mdKeysInDocOrder.push(match[1])
-	}
+	// 右侧该章节的 placeholders 就是权威 key 列表
+	const expectedKeys = store.sections[sectionNum]?.placeholders?.map(p => p.key) ?? []
 
-	// 从 DOM 中按文档顺序收集 chip/htmlBlock 的 key（仅限 key_格式）
-	const domKeysInDocOrder: Array<{ key: string; pos: number; nodeType: string }> = []
+	// 在 ProseMirror doc 中找到对应 section 节点，只遍历其内部
+	let sectionStart = -1
+	let sectionEnd = -1
 	doc.descendants((node, pos) => {
+		if (node.type.name === 'section' && (node.attrs.index as number) === sectionNum) {
+			sectionStart = pos
+			sectionEnd = pos + node.nodeSize
+			return false
+		}
+		return true
+	})
+	if (sectionStart < 0) return
+
+	// 收集该章节内 chip/htmlBlock 的 key（按文档顺序）
+	const domKeys: Array<{ key: string; pos: number; nodeType: string }> = []
+	doc.nodesBetween(sectionStart, sectionEnd, (node, pos) => {
 		if (node.type.name === 'chip') {
 			const k = node.attrs.key as string
-			if (/^key_\d+_/.test(k)) domKeysInDocOrder.push({ key: k, pos, nodeType: 'chip' })
+			if (/^key_\d+_/.test(k)) domKeys.push({ key: k, pos, nodeType: 'chip' })
 		} else if (node.type.name === 'htmlBlock') {
 			const k = node.attrs.chipKey as string
-			if (/^key_\d+_/.test(k)) domKeysInDocOrder.push({ key: k, pos, nodeType: 'htmlBlock' })
+			if (/^key_\d+_/.test(k)) domKeys.push({ key: k, pos, nodeType: 'htmlBlock' })
 		}
 		return true
 	})
 
-	// 找出 DOM 中与 markdown 不一致的节点
-	const mismatches: Array<{ domKey: string; expectedKey: string; pos: number; nodeType: string }> = []
-	for (let i = 0; i < domKeysInDocOrder.length; i++) {
-		const dom = domKeysInDocOrder[i]
-		const expected = mdKeysInDocOrder[i]
-		if (dom.key !== expected) {
-			mismatches.push({ domKey: dom.key, expectedKey: expected, pos: dom.pos, nodeType: dom.nodeType })
+	// 找出不一致的节点（DOM key 与右侧期望 key 不同）
+	const mismatches: Array<{ expectedKey: string; pos: number; nodeType: string }> = []
+	for (let i = 0; i < domKeys.length; i++) {
+		if (domKeys[i].key !== expectedKeys[i]) {
+			mismatches.push({ expectedKey: expectedKeys[i], pos: domKeys[i].pos, nodeType: domKeys[i].nodeType })
 		}
 	}
 
 	if (mismatches.length === 0) return
 
-	// 从后往前重命名（避免前面的位置被覆盖导致后续映射错位）
+	// 从后往前重命名，避免位置被覆盖
 	const tr = view.state.tr
 	for (let i = mismatches.length - 1; i >= 0; i--) {
-		const { domKey, expectedKey, pos, nodeType } = mismatches[i]
+		const { expectedKey, pos, nodeType } = mismatches[i]
 		if (!expectedKey) continue
 		const node = doc.nodeAt(pos)
 		if (node) {
@@ -790,12 +807,16 @@ function syncSectionsFromEditor() {
 		})
 
 		const originalSection = store.sections[sectionIndex]
+		const secPlaceholders = sectionKeys
+			.map(key => phMap.get(key) || { key, original: key, type: 'TYPE_DESCRIPTION' as const, fill_mode: 'newline' as const, field: null, prompt: null })
+
 		store.sections[sectionIndex] = {
 			...originalSection,
 			...(sectionTitle !== null ? { title: sectionTitle } : {}),
 			template_content: newTemplateContent,
 			// 仅当 newContent 与当前 content 不同时才更新（允许用户在 section.content 中做额外编辑）
 			content: newContent !== originalSection.content ? newContent : originalSection.content,
+			placeholders: secPlaceholders,
 		}
 	})
 
@@ -817,7 +838,7 @@ function addChipFromSelection() {
 
 	const sel = editor.value.state.selection
 	const sectionIndex = getSectionIndexFromSelection()
-	const sectionNum = sectionIndex
+	const sectionNum = sectionIndex // 0-based
 
 	// --- 表格 HtmlBlockNode 特殊处理 ---
 	if (sel instanceof NodeSelection && sel.node.type.name === 'htmlBlock') {
