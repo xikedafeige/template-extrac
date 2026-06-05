@@ -682,16 +682,6 @@ function formatKeyPosition(key: string): string {
 	return `第${matched[1]}章第${matched[2]}节`
 }
 
-function normalizeTableHtml(value: string): string | null {
-	const trimmed = value.trim()
-	if (!trimmed) return null
-
-	const decoded = decodeHtmlEntities(trimmed)
-	const candidate = /<table\b[\s\S]*?<\/table>/i.test(decoded) ? decoded : trimmed
-	const matched = candidate.match(/<table\b[\s\S]*?<\/table>/i)
-	return matched ? matched[0] : null
-}
-
 function decodeHtmlEntities(value: string): string {
 	return value
 		.replace(/&lt;/g, '<')

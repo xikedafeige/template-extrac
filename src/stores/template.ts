@@ -440,53 +440,6 @@ export const useTemplateStore = defineStore('template', () => {
     return true
   }
 
-  function removeSectionsKey(key: string, restoreContent: string) {
-    const re = new RegExp(`\\{\\{${key}\\}\\}`, 'g')
-    // 使用函数作为替换参数，避免 restoreContent 中的 $ 被当作反向引用
-    const safeReplace = (text: string) => text.replace(re, () => restoreContent)
-    sections.value = sections.value.map(sec => ({
-      ...sec,
-      title: typeof sec.title === 'string' ? safeReplace(sec.title) : sec.title,
-      template_content: safeReplace(sec.template_content || ''),
-    }))
-  }
-
-  function unwrapPlaceholderRestoreContent(content: string): string {
-    if (!content || !/(data-chip|data-html-block)/i.test(content)) return content
-    if (typeof document === 'undefined') return content
-
-    const wrapper = document.createElement('div')
-    wrapper.innerHTML = content
-
-    wrapper.querySelectorAll('[data-html-block]').forEach((el) => {
-      const encoded = el.getAttribute('data-html-encoded') || ''
-      if (!encoded) return
-
-      try {
-        const html = decodeURIComponent(atob(encoded))
-        const replacement = document.createElement('div')
-        replacement.innerHTML = html
-        const fragment = document.createDocumentFragment()
-        Array.from(replacement.childNodes).forEach(node => fragment.appendChild(node))
-        el.replaceWith(fragment)
-      } catch {
-        el.replaceWith(document.createTextNode(el.textContent || ''))
-      }
-    })
-
-    wrapper.querySelectorAll('span[data-chip]').forEach((el) => {
-      const original = el.getAttribute('data-original') || el.textContent || ''
-      el.replaceWith(document.createTextNode(original))
-    })
-
-    return wrapper.innerHTML.trim() || wrapper.textContent || content
-  }
-
-  function getPlaceholderRestoreContent(ph: Placeholder): string {
-    const restoreContent = ph.originalHtml?.trim() || ph.original || ''
-    return unwrapPlaceholderRestoreContent(restoreContent)
-  }
-
   // 删除后重排该章节内所有 key 的序号
   function removePlaceholder(key: string) {
     console.log('[removePlaceholder] called with key=', key)

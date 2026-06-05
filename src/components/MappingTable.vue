@@ -269,24 +269,6 @@ function formatKeyPosition(key: string) {
 	return `第${matched[1]}章第${matched[2]}节`
 }
 
-function extractTableHtml(value?: string | null) {
-	if (!value) return ''
-	const trimmed = value.trim()
-	if (!trimmed) return ''
-
-	const decoded = decodeHtmlEntities(trimmed)
-	const matched = decoded.match(/<table\b[\s\S]*?<\/table>/i)
-	return matched ? matched[0] : ''
-}
-
-function decodeHtmlEntities(value: string) {
-	return value
-		.replace(/&lt;/g, '<')
-		.replace(/&gt;/g, '>')
-		.replace(/&quot;/g, '"')
-		.replace(/&#39;/g, "'")
-		.replace(/&amp;/g, '&')
-}
 </script>
 
 <style scoped>
