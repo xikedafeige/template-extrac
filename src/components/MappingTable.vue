@@ -234,7 +234,7 @@ async function handleSubmit() {
 				custom_id: store.customId,
 			}
 			console.log('[edit payload]', payload)
-			return
+			// return
 			const res = await editTemplate(payload)
 			alert(`保存成功！template_id: ${res.template_id}`)
 			console.log('[edit response]', res)
