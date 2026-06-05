@@ -41,6 +41,7 @@ import { ChipNode } from '../editor/ChipNode'
 import { HtmlBlockNode } from '../editor/HtmlBlockNode'
 import { SectionNode } from '../editor/SectionNode'
 import { useTemplateStore } from '../stores/template'
+import { escapeAttr, escapeHtml, renderOriginalMarkdown } from '../utils/markdownOriginal'
 import '../editor/chipStyles.css'
 import MarkdownIt from 'markdown-it'
 
@@ -348,6 +349,15 @@ watch(
 		} finally {
 			isSettingContent = false
 			store.pendingRemoveKey = null
+			nextTick(() => {
+				if (!editor.value) return
+				isSettingContent = true
+				editor.value.commands.setContent(buildEditorHtml())
+				nextTick(() => {
+					isSettingContent = false
+					scanChips(editor.value!)
+				})
+			})
 		}
 	}
 )
@@ -402,6 +412,7 @@ function updateReindexedDomKeys(sectionNum: number) {
 		const isChipMismatch = domKeys[i].nodeType === 'chip' && node && (
 			domKeys[i].key !== expectedKey ||
 			node.attrs.original !== expectedPh.original ||
+			(node.attrs.originalHtml || '') !== (expectedPh.originalHtml || '') ||
 			node.attrs.type !== expectedPh.type ||
 			node.attrs.fill_mode !== expectedPh.fill_mode ||
 			(node.attrs.field || null) !== (expectedPh.field || null) ||
@@ -433,6 +444,7 @@ function updateReindexedDomKeys(sectionNum: number) {
 					...node.attrs,
 					key: expectedKey,
 					original: expectedPh.original,
+					originalHtml: expectedPh.originalHtml || '',
 					type: expectedPh.type,
 					fill_mode: expectedPh.fill_mode,
 					field: expectedPh.field || null,
@@ -535,13 +547,12 @@ function buildEditorHtml(): string {
 							if (!ph) return `{{${key}}}`
 							const position = formatKeyPosition(key)
 							const chipTitle = position ? `${position} | key: ${key}` : `key: ${key}`
-							const cls = ph.type === 'TYPE_FILL' ? 'chip--TYPE_FILL' : 'chip--TYPE_DESCRIPTION'
 							const hasTable = /<table\b[\s\S]*?<\/table>/i.test(decodeHtmlEntities(ph.original || ''))
 							if (hasTable) {
 								const encoded = btoa(encodeURIComponent(ph.original || ''))
 								return `<div data-html-block="" data-html-encoded="${encoded}" data-chip-type="${ph.type}" data-chip-key="${key}" draggable="false"></div>`
 							}
-							return `<span data-chip="" data-key="${key}" data-original="${escapeAttr(ph.original || key)}" data-type="${ph.type}" data-fill_mode="${ph.fill_mode}" data-field="${ph.field || ''}" data-prompt="${escapeAttr(ph.prompt || '')}" data-note="${escapeAttr(ph.note || '')}" class="chip ${cls}" title="${escapeAttr(chipTitle)}" draggable="false">${escapeHtml(ph.original || key)}</span>`
+							return buildChipHtml(ph, key, chipTitle)
 						})}</h2>`
 					})()
 					: ''
@@ -582,6 +593,14 @@ function normalizeSectionTitle(title: string): string {
 	return title.replace(/\s+/g, ' ').trim()
 }
 
+function buildChipHtml(ph: any, key: string, title: string): string {
+	const original = ph.original || key
+	const originalHtml = ph.originalHtml || ''
+	const displayHtml = renderOriginalMarkdown(originalHtml || original) || escapeHtml(original)
+	const typeClass = ph.type === 'TYPE_FILL' ? 'chip--TYPE_FILL' : 'chip--TYPE_DESCRIPTION'
+	return `<span data-chip="" data-key="${key}" data-original="${escapeAttr(original)}" data-original-html="${escapeAttr(originalHtml)}" data-type="${ph.type}" data-fill_mode="${ph.fill_mode}" data-field="${ph.field || ''}" data-prompt="${escapeAttr(ph.prompt || '')}" data-note="${escapeAttr(ph.note || '')}" class="chip ${typeClass}" title="${escapeAttr(title)}" draggable="false">${displayHtml}</span>`
+}
+
 function markdownToHtml(mdText: string, placeholders: any[]): string {
 	const phMap = new Map(placeholders.map(p => [p.key, p]))
 
@@ -601,7 +620,7 @@ function markdownToHtml(mdText: string, placeholders: any[]): string {
 
 		const position = formatKeyPosition(key)
 		const title = position ? `${position} | key: ${key}` : `key: ${key}`
-		return `<span data-chip="" data-key="${key}" data-original="${escapeAttr(ph.original || key)}" data-type="${ph.type}" data-fill_mode="${ph.fill_mode}" data-field="${ph.field || ''}" data-prompt="${escapeAttr(ph.prompt || '')}" data-note="${escapeAttr(ph.note || '')}" class="chip ${ph.type === 'TYPE_FILL' ? 'chip--TYPE_FILL' : 'chip--TYPE_DESCRIPTION'}" title="${escapeAttr(title)}" draggable="false">${escapeHtml(ph.original || key)}</span>`
+		return buildChipHtml(ph, key, title)
 	}
 
 	function wrapTableHtml(tableHtml: string, keyOverride = '', typeOverride = ''): string {
@@ -680,19 +699,6 @@ function decodeHtmlEntities(value: string): string {
 		.replace(/&quot;/g, '"')
 		.replace(/&#39;/g, "'")
 		.replace(/&amp;/g, '&')
-}
-
-function escapeHtml(s: string): string {
-	return s
-		.replace(/&/g, '&amp;')
-		.replace(/</g, '&lt;')
-		.replace(/>/g, '&gt;')
-}
-
-function escapeAttr(s: string): string {
-	return escapeHtml(s)
-		.replace(/"/g, '&quot;')
-		.replace(/\r?\n/g, '&#10;')
 }
 
 function extractSelectedHtml(from: number, to: number): string {
@@ -950,6 +956,7 @@ function addChipFromSelection() {
 		editor.value.chain().focus().deleteSelection().insertChip({
 			key,
 			original: tableHtml,
+			originalHtml: tableHtml,
 			type: 'TYPE_DESCRIPTION',
 			fill_mode: 'newline',
 			field: null,
@@ -990,6 +997,7 @@ function addChipFromSelection() {
 	editor.value.chain().focus().deleteSelection().insertChip({
 		key,
 		original: selectedContent,
+		originalHtml: selectedHtml || undefined,
 		type: 'TYPE_DESCRIPTION',
 		fill_mode: 'newline',
 		field: null,

@@ -1,8 +1,10 @@
 import { Node, mergeAttributes } from '@tiptap/core'
+import { renderOriginalMarkdown } from '../utils/markdownOriginal'
 
 export interface ChipAttrs {
   key: string
   original: string
+  originalHtml?: string
   type: 'TYPE_FILL' | 'TYPE_DESCRIPTION'
   fill_mode: 'inline' | 'newline'
   field: string | null
@@ -64,6 +66,7 @@ export const ChipNode = Node.create({
     return {
       key:       { default: '', parseHTML: el => el.getAttribute('data-key') || '' },
       original:  { default: '', parseHTML: el => el.getAttribute('data-original') || '' },
+      originalHtml: { default: '', parseHTML: el => el.getAttribute('data-original-html') || '' },
       type:      { default: 'TYPE_FILL', parseHTML: el => el.getAttribute('data-type') || 'TYPE_FILL' },
       fill_mode: { default: 'inline', parseHTML: el => el.getAttribute('data-fill_mode') || 'inline' },
       field:     { default: null, parseHTML: el => el.getAttribute('data-field') || null },
@@ -90,6 +93,7 @@ export const ChipNode = Node.create({
         'data-chip': '',
         'data-key': HTMLAttributes.key,
         'data-original': HTMLAttributes.original,
+        'data-original-html': HTMLAttributes.originalHtml || '',
         'data-type': HTMLAttributes.type,
         'data-fill_mode': HTMLAttributes.fill_mode,
         'data-field': HTMLAttributes.field || '',
@@ -110,6 +114,38 @@ export const ChipNode = Node.create({
         ({ commands }) => {
           return commands.insertContent({ type: this.name, attrs })
         },
+    }
+  },
+
+  addNodeView() {
+    return ({ node, HTMLAttributes }) => {
+      const dom = document.createElement('span')
+      const type = node.attrs.type || HTMLAttributes['data-type'] || 'TYPE_FILL'
+      const key = node.attrs.key || HTMLAttributes['data-key'] || ''
+      const original = node.attrs.original || HTMLAttributes['data-original'] || ''
+      const originalHtml = node.attrs.originalHtml || HTMLAttributes['data-original-html'] || ''
+
+      Object.entries(HTMLAttributes).forEach(([name, value]) => {
+        if (value === null || value === undefined) return
+        dom.setAttribute(name, String(value))
+      })
+
+      dom.setAttribute('data-chip', '')
+      dom.setAttribute('data-key', key)
+      dom.setAttribute('data-original', original)
+      dom.setAttribute('data-original-html', originalHtml)
+      dom.setAttribute('data-type', type)
+      dom.setAttribute('data-fill_mode', node.attrs.fill_mode || HTMLAttributes['data-fill_mode'] || 'inline')
+      dom.setAttribute('data-field', node.attrs.field || HTMLAttributes['data-field'] || '')
+      dom.setAttribute('data-prompt', node.attrs.prompt || HTMLAttributes['data-prompt'] || '')
+      dom.setAttribute('data-note', node.attrs.note || HTMLAttributes['data-note'] || '')
+      dom.setAttribute('draggable', 'false')
+      dom.classList.add('chip')
+      applyTypeClass(dom, type)
+      dom.title = `key: ${key}`
+      dom.innerHTML = renderOriginalMarkdown(originalHtml || original) || original || `{{${key}}}`
+
+      return { dom }
     }
   },
 

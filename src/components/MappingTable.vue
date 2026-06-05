@@ -28,7 +28,7 @@
 				</div>
 				<div class="mapping-item-original">
 					<div class="mapping-preview-label">原文内容</div>
-					<div class="mapping-original-text">{{ ph.original || '(空)' }}</div>
+					<div class="mapping-original-text" v-html="renderPlaceholderOriginal(ph)"></div>
 				</div>
 
 				<!-- TYPE_FILL: 字段绑定 -->
@@ -89,6 +89,7 @@
 <script setup lang="ts">
 import { useTemplateStore } from '../stores/template'
 import { editTemplate, submitTemplate, generatePlaceholderPrompt } from '../api/template'
+import { escapeHtml, renderOriginalMarkdown } from '../utils/markdownOriginal'
 import { computed, watch, ref, nextTick } from 'vue'
 
 const props = defineProps<{
@@ -132,6 +133,11 @@ function typeLabel(type: string) {
 		TYPE_DESCRIPTION: '描述',
 	}
 	return map[type] || type
+}
+
+function renderPlaceholderOriginal(ph: { original?: string; originalHtml?: string }) {
+	const source = ph.originalHtml || ph.original || ''
+	return source ? renderOriginalMarkdown(source) : escapeHtml('-')
 }
 
 function updateField(key: string, value: string) {
@@ -228,6 +234,7 @@ async function handleSubmit() {
 				custom_id: store.customId,
 			}
 			console.log('[edit payload]', payload)
+			return
 			const res = await editTemplate(payload)
 			alert(`保存成功！template_id: ${res.template_id}`)
 			console.log('[edit response]', res)
@@ -664,8 +671,24 @@ function decodeHtmlEntities(value: string) {
 	color: #64748b;
 	font-size: 13px;
 	line-height: 1.6;
-	white-space: pre-wrap;
+	white-space: normal;
 	word-break: break-word;
+}
+
+.mapping-original-text :deep(p) {
+	margin: 0;
+}
+
+.mapping-original-text :deep(code) {
+	padding: 1px 4px;
+	border-radius: 4px;
+	background: #f1f5f9;
+	color: #475569;
+}
+
+.mapping-original-text :deep(a) {
+	color: #2563eb;
+	text-decoration: none;
 }
 
 .mapping-table-preview {
