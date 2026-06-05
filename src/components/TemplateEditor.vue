@@ -459,7 +459,7 @@ function updateReindexedDomKeys(sectionNum: number) {
 watch(
 	() => {
 		const mdKey = store.templateMarkdown
-		const sectionsKey = store.sections.map(s => s.template_content || '').join('\x00')
+		const sectionsKey = store.sections.map(s => `${s.title || ''}\x00${s.template_content || ''}`).join('\x00')
 		const placeholderStructureKey = store.placeholders.map(p => `${p.key}:${p.original}:${p.originalHtml || ''}`).join('|')
 		return mdKey + '\x01' + sectionsKey + '\x01' + placeholderStructureKey
 	},
