@@ -256,7 +256,7 @@ watch(
 
 		// Step 0: 立即保存 restoreText（必须在 store 操作之前，避免 deletedStack 被后续删除覆盖）
 		const deletedPh = store.deletedStack[store.deletedStack.length - 1]
-		const restoreText = deletedPh?.originalHtml?.trim() || deletedPh?.original || ''
+		const restoreText = unwrapPlaceholderContent(deletedPh?.originalHtml?.trim() || deletedPh?.original || '')
 
 		// Step 1: 在当前 DOM 中查找 chip 位置（用当前 ProseMirror 文档）
 		const view = editor.value.view
@@ -680,6 +680,47 @@ function extractSelectedHtml(from: number, to: number): string {
 	return div.innerHTML.trim()
 }
 
+function selectionContainsExistingKey(from: number, to: number): boolean {
+	if (!editor.value) return false
+	let hasExistingKey = false
+
+	editor.value.state.doc.nodesBetween(from, to, (node) => {
+		if (node.type.name === 'chip' || node.type.name === 'htmlBlock') {
+			hasExistingKey = true
+			return false
+		}
+		return true
+	})
+
+	return hasExistingKey
+}
+
+function unwrapPlaceholderContent(content: string): string {
+	if (!content || !/(data-chip|data-html-block|data-html-encoded)/i.test(content)) return content
+	const div = document.createElement('div')
+	div.innerHTML = content
+
+	div.querySelectorAll('[data-html-encoded]').forEach((el) => {
+		const encoded = el.getAttribute('data-html-encoded') || ''
+		if (!encoded) return
+		try {
+			const html = decodeURIComponent(atob(encoded))
+			const wrapper = document.createElement('div')
+			wrapper.innerHTML = html
+			el.replaceWith(...Array.from(wrapper.childNodes))
+		} catch {
+			el.replaceWith(document.createTextNode(el.textContent || ''))
+		}
+	})
+
+	div.querySelectorAll('span[data-chip]').forEach((el) => {
+		const original = el.getAttribute('data-original') || el.textContent || ''
+		el.replaceWith(document.createTextNode(original))
+	})
+
+	return div.innerHTML.trim() || div.textContent || content
+}
+
 // 提取选区内容：文本节点取纯文本，htmlBlock 节点取解码后的原始 <table> HTML 标签
 function extractSelectedContent(from: number, to: number): string {
 	if (!editor.value) return ''
@@ -885,6 +926,11 @@ function addChipFromSelection() {
 	}
 
 	// --- 普通文本选区 ---
+	if (selectionContainsExistingKey(from, to)) {
+		alert('选区不能包含已有 key，请重新选择不包含 key 的文本')
+		return
+	}
+
 	const selectedContent = extractSelectedContent(from, to)
 	const selectedHtml = extractSelectedHtml(from, to)
 	const autoKey = store.generateKey(sectionNum)
