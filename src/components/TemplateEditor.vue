@@ -239,6 +239,18 @@ function getClickedPlaceholderKey(target: EventTarget | null): string | null {
 	return placeholder.dataset.key || placeholder.dataset.chipKey || null
 }
 
+function extractPlaceholderKeysFromText(value: string): string[] {
+	const seen = new Set<string>()
+	const keys: string[] = []
+	for (const match of value.matchAll(/\{\{\s*([^{}\s]+)\s*\}\}/g)) {
+		const key = store.normalizePlaceholderKey(match[1] || '')
+		if (!key || seen.has(key)) continue
+		seen.add(key)
+		keys.push(key)
+	}
+	return keys
+}
+
 // 精确替换被删除的占位符节点，并在同一个 watcher 中同步更新 store（templateMarkdown、sections.template_content）。
 // 关键执行顺序：
 //  1. 保存 restoreText（避免 deletedStack 竞态）
@@ -349,8 +361,10 @@ function updateReindexedDomKeys(sectionNum: number) {
 	const view = editor.value.view
 	const doc = view.state.doc
 
-	// 右侧该章节的 placeholders 就是权威 key 列表
-	const expectedKeys = store.sections[sectionNum]?.placeholders?.map(p => p.key) ?? []
+	// 当前章节文本中实际存在的 key 是权威顺序，placeholder 元数据从全局右侧列表读取。
+	const section = store.sections[sectionNum]
+	const expectedKeys = extractPlaceholderKeysFromText(`${section?.title || ''}\n${section?.template_content || ''}`)
+	const placeholderMap = new Map(store.placeholders.map(p => [p.key, p]))
 
 	// 在 ProseMirror doc 中找到对应 section 节点，只遍历其内部
 	let sectionStart = -1
@@ -378,11 +392,28 @@ function updateReindexedDomKeys(sectionNum: number) {
 		return true
 	})
 
-	// 找出不一致的节点（DOM key 与右侧期望 key 不同）
+	// 找出不一致的节点（DOM key/type 等元数据与右侧期望数据不同）
 	const mismatches: Array<{ expectedKey: string; pos: number; nodeType: string }> = []
 	for (let i = 0; i < domKeys.length; i++) {
-		if (domKeys[i].key !== expectedKeys[i]) {
-			mismatches.push({ expectedKey: expectedKeys[i], pos: domKeys[i].pos, nodeType: domKeys[i].nodeType })
+		const expectedKey = expectedKeys[i]
+		const expectedPh = placeholderMap.get(expectedKey)
+		if (!expectedKey || !expectedPh) continue
+		const node = doc.nodeAt(domKeys[i].pos)
+		const isChipMismatch = domKeys[i].nodeType === 'chip' && node && (
+			domKeys[i].key !== expectedKey ||
+			node.attrs.original !== expectedPh.original ||
+			node.attrs.type !== expectedPh.type ||
+			node.attrs.fill_mode !== expectedPh.fill_mode ||
+			(node.attrs.field || null) !== (expectedPh.field || null) ||
+			(node.attrs.prompt || null) !== (expectedPh.prompt || null) ||
+			(node.attrs.note || '') !== (expectedPh.note || '')
+		)
+		const isHtmlBlockMismatch = domKeys[i].nodeType === 'htmlBlock' && node && (
+			domKeys[i].key !== expectedKey ||
+			node.attrs.chipType !== expectedPh.type
+		)
+		if (isChipMismatch || isHtmlBlockMismatch) {
+			mismatches.push({ expectedKey, pos: domKeys[i].pos, nodeType: domKeys[i].nodeType })
 		}
 	}
 
@@ -393,17 +424,33 @@ function updateReindexedDomKeys(sectionNum: number) {
 	for (let i = mismatches.length - 1; i >= 0; i--) {
 		const { expectedKey, pos, nodeType } = mismatches[i]
 		if (!expectedKey) continue
+		const expectedPh = placeholderMap.get(expectedKey)
+		if (!expectedPh) continue
 		const node = doc.nodeAt(pos)
 		if (node) {
 			if (nodeType === 'chip') {
-				tr.setNodeMarkup(pos, undefined, { ...node.attrs, key: expectedKey })
+				tr.setNodeMarkup(pos, undefined, {
+					...node.attrs,
+					key: expectedKey,
+					original: expectedPh.original,
+					type: expectedPh.type,
+					fill_mode: expectedPh.fill_mode,
+					field: expectedPh.field || null,
+					prompt: expectedPh.prompt || null,
+					note: expectedPh.note || '',
+				})
 			} else {
-				tr.setNodeMarkup(pos, undefined, { ...node.attrs, chipKey: expectedKey })
+				tr.setNodeMarkup(pos, undefined, {
+					...node.attrs,
+					chipKey: expectedKey,
+					chipType: expectedPh.type,
+				})
 			}
 		}
 	}
 
 	view.dispatch(tr)
+	nextTick(() => scanChips(editor.value!))
 }
 
 // 只在结构性内容变化时重建编辑器（templateMarkdown、sections 的 template_content、以及占位符的 key/original 集合）
