@@ -11,7 +11,9 @@ import type {
   GeneratePromptResponse,
 } from '../types/template'
 
-const api = axios.create()
+const api = axios.create({
+  baseURL: import.meta.env.PROD ? '/performance-api' : '',
+})
 
 export async function uploadTemplate(file: File): Promise<UploadResponse> {
   const formData = new FormData()
