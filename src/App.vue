@@ -8,14 +8,16 @@
     <TemplateUpload
       :mode="view === 'edit' ? 'edit' : 'create'"
       @back-list="backToList"
+      @uploaded="refreshWorkbench"
     />
     <div v-if="detailLoading" class="workbench-loading">加载模板数据中...</div>
     <div v-else class="main">
       <div class="editor-panel">
-        <TemplateEditor />
+        <TemplateEditor :key="workbenchVersion" />
       </div>
       <div class="config-panel">
         <MappingTable
+          :key="workbenchVersion"
           :is-edit-mode="view === 'edit'"
           @submit="backToList"
           @edit="backToList"
@@ -39,9 +41,11 @@ type AppView = 'list' | 'create' | 'edit'
 const store = useTemplateStore()
 const view = ref<AppView>('list')
 const detailLoading = ref(false)
+const workbenchVersion = ref(0)
 
 function openCreate() {
   store.resetForCreate()
+  workbenchVersion.value += 1
   view.value = 'create'
 }
 
@@ -52,6 +56,7 @@ async function openEdit(templateId: string) {
     const res = await getTemplateDetail(templateId)
     if (res.code === 0 && res.data) {
       store.loadFromDetail(res.data)
+      refreshWorkbench()
     } else {
       alert('获取模板详情失败')
       backToList()
@@ -67,6 +72,10 @@ async function openEdit(templateId: string) {
 function backToList() {
   store.resetForCreate()
   view.value = 'list'
+}
+
+function refreshWorkbench() {
+  workbenchVersion.value += 1
 }
 </script>
 

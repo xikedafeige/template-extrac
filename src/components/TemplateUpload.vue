@@ -34,6 +34,7 @@ const props = withDefaults(defineProps<{
 const store = useTemplateStore()
 const emit = defineEmits<{
 	'back-list': []
+	uploaded: []
 }>()
 
 const loading = ref(false)
@@ -69,6 +70,7 @@ async function handleFile(e: Event) {
 		const res = await uploadTemplate(file)
 		console.log('[upload response]', res)
 		store.setUploadResult(res.template_markdown, res.placeholders, res.sections)
+		emit('uploaded')
 	} catch (err: any) {
 		alert('上传失败: ' + (err.response?.data?.error || err.message))
 	} finally {

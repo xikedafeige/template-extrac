@@ -195,6 +195,8 @@ export const useTemplateStore = defineStore('template', () => {
     sections.value = syncSectionPlaceholders(nextSections, nextPlaceholders)
     deletedStack.value = []
     selectedChipKey.value = null
+    pendingRemoveKey.value = null
+    suppressEditorSync.value = false
   }
 
   function loadFromDetail(data: TemplateDetail) {
