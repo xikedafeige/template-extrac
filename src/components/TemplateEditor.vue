@@ -41,7 +41,7 @@ import { ChipNode } from '../editor/ChipNode'
 import { HtmlBlockNode } from '../editor/HtmlBlockNode'
 import { SectionNode } from '../editor/SectionNode'
 import { useTemplateStore } from '../stores/template'
-import { escapeAttr, escapeHtml, renderOriginalMarkdown } from '../utils/markdownOriginal'
+import { escapeAttr, escapeHtml, renderInlineMarkdownInHtml, renderOriginalMarkdown } from '../utils/markdownOriginal'
 import '../editor/chipStyles.css'
 import MarkdownIt from 'markdown-it'
 
@@ -542,18 +542,27 @@ function buildEditorHtml(): string {
 				const renderedTitle = shouldRenderTitle
 					? (() => {
 						const phMap = new Map(store.placeholders.map(p => [p.key, p]))
-						return `<h2>${title.replace(/\{\{([\w]+)\}\}/g, (_, key) => {
+						const chipHtmlMap = new Map<string, string>()
+						const withTokens = title.replace(/\{\{([\w]+)\}\}/g, (_, key) => {
 							const ph = phMap.get(key)
 							if (!ph) return `{{${key}}}`
 							const position = formatKeyPosition(key)
 							const chipTitle = position ? `${position} | key: ${key}` : `key: ${key}`
 							const hasTable = /<table\b[\s\S]*?<\/table>/i.test(decodeHtmlEntities(ph.original || ''))
+							const token = `TITLECHIPTOKEN_${key}_ENDCHIP`
 							if (hasTable) {
 								const encoded = btoa(encodeURIComponent(ph.original || ''))
-								return `<div data-html-block="" data-html-encoded="${encoded}" data-chip-type="${ph.type}" data-chip-key="${key}" draggable="false"></div>`
+								chipHtmlMap.set(token, `<div data-html-block="" data-html-encoded="${encoded}" data-chip-type="${ph.type}" data-chip-key="${key}" draggable="false"></div>`)
+								return token
 							}
-							return buildChipHtml(ph, key, chipTitle)
-						})}</h2>`
+							chipHtmlMap.set(token, buildChipHtml(ph, key, chipTitle))
+							return token
+						})
+						let rendered = md.renderInline(withTokens)
+						for (const [token, chipHtml] of chipHtmlMap) {
+							rendered = rendered.split(token).join(chipHtml)
+						}
+						return `<h2>${renderInlineMarkdownInHtml(rendered)}</h2>`
 					})()
 					: ''
 				const inner = [
@@ -647,7 +656,7 @@ function markdownToHtml(mdText: string, placeholders: any[]): string {
 		for (const [token, chipHtml] of chipHtmlMap) {
 			rendered = rendered.split(token).join(chipHtml)
 		}
-		return wrapRenderedTables(rendered)
+		return wrapRenderedTables(renderInlineMarkdownInHtml(rendered))
 	}
 
 	const htmlParts: string[] = []
