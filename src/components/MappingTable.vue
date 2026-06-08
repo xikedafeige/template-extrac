@@ -653,7 +653,7 @@ function formatKeyPosition(key: string) {
 	color: #64748b;
 	font-size: 13px;
 	line-height: 1.6;
-	white-space: normal;
+	white-space: pre-wrap;
 	word-break: break-word;
 }
 

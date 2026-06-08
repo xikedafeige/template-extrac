@@ -1,11 +1,22 @@
 import MarkdownIt from 'markdown-it'
 
-const md = new MarkdownIt({ html: true, breaks: false, linkify: false })
+const md = new MarkdownIt({ html: true, breaks: true, linkify: false })
 const INLINE_MARKDOWN_PATTERN = /(\*\*|__).+?\1/
 const SKIP_MARKDOWN_SELECTOR = 'table, pre, code, script, style, [data-chip], [data-html-block]'
 
 function stripParagraphWrapper(html: string): string {
   const trimmed = html.trim()
+  if (typeof document !== 'undefined') {
+    const wrapper = document.createElement('div')
+    wrapper.innerHTML = trimmed
+    if (
+      wrapper.childElementCount === 1 &&
+      wrapper.firstElementChild?.tagName.toLowerCase() === 'p'
+    ) {
+      return wrapper.firstElementChild.innerHTML
+    }
+    return trimmed
+  }
   const matched = trimmed.match(/^<p>([\s\S]*)<\/p>$/)
   return matched ? matched[1] : trimmed
 }

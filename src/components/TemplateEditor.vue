@@ -45,7 +45,7 @@ import { escapeAttr, escapeHtml, renderInlineMarkdownInHtml, renderOriginalMarkd
 import '../editor/chipStyles.css'
 import MarkdownIt from 'markdown-it'
 
-const md = new MarkdownIt({ html: true, breaks: false, linkify: false })
+const md = new MarkdownIt({ html: true, breaks: true, linkify: false })
 const tablePattern = /<table\b[\s\S]*?<\/table>/gi
 
 const store = useTemplateStore()
@@ -269,7 +269,7 @@ watch(
 
 		// Step 0: 立即保存 restoreText（必须在 store 操作之前，避免 deletedStack 被后续删除覆盖）
 		const deletedPh = store.deletedStack[store.deletedStack.length - 1]
-		const restoreText = unwrapPlaceholderContent(deletedPh?.originalHtml?.trim() || deletedPh?.original || '')
+		const restoreText = unwrapPlaceholderContent(deletedPh?.original || deletedPh?.originalHtml || '')
 
 		// Step 1: 在当前 DOM 中查找 chip 位置（用当前 ProseMirror 文档）
 		const view = editor.value.view
@@ -774,6 +774,47 @@ function unwrapPlaceholderContent(content: string): string {
 }
 
 // 提取选区内容：文本节点取纯文本，htmlBlock 节点取解码后的原始 <table> HTML 标签
+function decodeHtmlBlockNode(node: any): string {
+	const encoded = node?.attrs?.encoded || ''
+	if (!encoded) return ''
+	try {
+		return decodeURIComponent(atob(encoded))
+	} catch {
+		return ''
+	}
+}
+
+function extractTextFromBlockNode(block: any, blockPos: number, from: number, to: number): string {
+	const parts: string[] = []
+
+	block.descendants((child: any, childPos: number) => {
+		const absolutePos = blockPos + 1 + childPos
+
+		if (child.type.name === 'hardBreak') {
+			if (absolutePos >= from && absolutePos <= to) parts.push('\n')
+			return false
+		}
+
+		if (child.type.name === 'chip') {
+			if (absolutePos < to && absolutePos + child.nodeSize > from) {
+				parts.push(child.attrs.original || `{{${child.attrs.key || ''}}}`)
+			}
+			return false
+		}
+
+		if (child.isText) {
+			const textStart = Math.max(from, absolutePos) - absolutePos
+			const textEnd = Math.min(to, absolutePos + child.nodeSize) - absolutePos
+			const sliced = (child.text || '').slice(textStart, textEnd)
+			if (sliced) parts.push(sliced)
+		}
+
+		return true
+	})
+
+	return parts.join('')
+}
+
 function extractSelectedContent(from: number, to: number): string {
 	if (!editor.value) return ''
 	const doc = editor.value.state.doc
@@ -781,15 +822,16 @@ function extractSelectedContent(from: number, to: number): string {
 
 	doc.nodesBetween(from, to, (node, pos) => {
 		if (node.type.name === 'htmlBlock') {
-			const encoded = node.attrs.encoded || ''
-			if (encoded) {
-				try {
-					parts.push(decodeURIComponent(atob(encoded)))
-				} catch {
-					// skip
-				}
-			}
+			const html = decodeHtmlBlockNode(node)
+			if (html) parts.push(html)
 			return false // 不遍历子节点
+		}
+		if (node.isBlock && node.type.name !== 'section') {
+			const text = extractTextFromBlockNode(node, pos, from, to)
+			if (text || (from < pos + node.nodeSize && to > pos)) {
+				parts.push(text)
+			}
+			return false
 		}
 		if (node.isText) {
 			// 裁剪到选区范围内的实际文本

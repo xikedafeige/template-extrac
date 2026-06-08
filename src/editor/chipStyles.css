@@ -1,6 +1,6 @@
 .chip,
 span[data-chip] {
-	display: inline;
+	display: inline-block;
 	align-items: center;
 	padding: 2px 10px;
 	border-radius: 6px;
@@ -11,8 +11,8 @@ span[data-chip] {
 	user-select: none;
 	-webkit-user-drag: none;
 	vertical-align: baseline;
-	white-space: nowrap;
-	max-width: 260px;
+	white-space: pre-wrap;
+	max-width: 600px;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	margin: 0 2px;
@@ -21,8 +21,11 @@ span[data-chip] {
 }
 
 span[data-chip] p {
-	display: inline;
 	margin: 0;
+}
+
+span[data-chip] p:only-child {
+	display: inline;
 }
 
 span[data-chip] code {
