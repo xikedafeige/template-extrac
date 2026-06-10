@@ -41,7 +41,7 @@ import { ChipNode } from '../editor/ChipNode'
 import { HtmlBlockNode } from '../editor/HtmlBlockNode'
 import { SectionNode } from '../editor/SectionNode'
 import { useTemplateStore } from '../stores/template'
-import { escapeAttr, escapeHtml, renderInlineMarkdownInHtml, renderOriginalMarkdown } from '../utils/markdownOriginal'
+import { escapeAttr, escapeHtml, renderChipInlineMarkdown, renderInlineMarkdownInHtml } from '../utils/markdownOriginal'
 import '../editor/chipStyles.css'
 import MarkdownIt from 'markdown-it'
 
@@ -605,7 +605,7 @@ function normalizeSectionTitle(title: string): string {
 function buildChipHtml(ph: any, key: string, title: string): string {
 	const original = ph.original || key
 	const originalHtml = ph.originalHtml || ''
-	const displayHtml = renderOriginalMarkdown(originalHtml || original) || escapeHtml(original)
+	const displayHtml = renderChipInlineMarkdown(originalHtml || original) || escapeHtml(original)
 	const typeClass = ph.type === 'TYPE_FILL' ? 'chip--TYPE_FILL' : 'chip--TYPE_DESCRIPTION'
 	return `<span data-chip="" data-key="${key}" data-original="${escapeAttr(original)}" data-original-html="${escapeAttr(originalHtml)}" data-type="${ph.type}" data-fill_mode="${ph.fill_mode}" data-field="${ph.field || ''}" data-prompt="${escapeAttr(ph.prompt || '')}" data-note="${escapeAttr(ph.note || '')}" class="chip ${typeClass}" title="${escapeAttr(title)}" draggable="false">${displayHtml}</span>`
 }
@@ -992,6 +992,7 @@ function addChipFromSelection() {
 		if (!inputKey) return
 		const key = store.normalizePlaceholderKey(inputKey)
 		if (!key) return
+		store.clearDeletedStack()
 
 		// 用 ChipNode 显示原始 HTML 标签文本
 		editor.value.chain().focus().deleteSelection().insertChip({
@@ -1017,6 +1018,7 @@ function addChipFromSelection() {
 		})
 		syncSectionsFromEditor()
 		store.selectChip(key)
+		store.clearDeletedStack()
 		return
 	}
 
@@ -1034,6 +1036,7 @@ function addChipFromSelection() {
 	if (!inputKey) return
 	const key = store.normalizePlaceholderKey(inputKey)
 	if (!key) return
+	store.clearDeletedStack()
 
 	editor.value.chain().focus().deleteSelection().insertChip({
 		key,
@@ -1058,13 +1061,28 @@ function addChipFromSelection() {
 	})
 	syncSectionsFromEditor()
 	store.selectChip(key)
+	store.clearDeletedStack()
 }
 
 function undoDelete() {
+	if (store.deletedStack.length === 0) return
 	const ph = store.popDeleted()
-	if (ph) {
-		store.restorePlaceholder(ph)
+	if (!ph) return
+	if (syncDebounceTimer !== null) {
+		clearTimeout(syncDebounceTimer)
+		syncDebounceTimer = null
 	}
+	isSettingContent = true
+	const restored = store.restorePlaceholder(ph)
+	if (!restored || !editor.value) {
+		isSettingContent = false
+		return
+	}
+	editor.value.commands.setContent(buildEditorHtml())
+	nextTick(() => {
+		isSettingContent = false
+		if (editor.value) scanChips(editor.value)
+	})
 }
 
 onBeforeUnmount(() => {

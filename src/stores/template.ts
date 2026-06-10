@@ -153,12 +153,51 @@ function replaceFirst(source: string, search: string, replacement: string): stri
   return source.slice(0, index) + replacement + source.slice(index + search.length)
 }
 
-function replaceAtOrInsert(source: string, offset: number, search: string, replacement: string): string {
+function replaceAt(source: string, offset: number, search: string, replacement: string): string | null {
   const safeOffset = Math.max(0, Math.min(offset, source.length))
   if (search && source.slice(safeOffset, safeOffset + search.length) === search) {
     return source.slice(0, safeOffset) + replacement + source.slice(safeOffset + search.length)
   }
-  return source.slice(0, safeOffset) + replacement + source.slice(safeOffset)
+  return null
+}
+
+function buildTemplateMarkdownFromSections(secs: Section[]): string {
+  return secs
+    .flatMap(sec => sec.title ? [sec.title, sec.template_content || ''] : [sec.template_content || ''])
+    .join('\n\n')
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function normalizeRestoreText(value: string): string {
+  return value.replace(/\r\n?/g, '\n').trim()
+}
+
+function buildRestoreOriginalVariants(original: string): string[] {
+  const normalized = normalizeRestoreText(original)
+  return [...new Set([
+    original,
+    normalized,
+    normalized.replace(/\n{2,}/g, '\n'),
+    normalized.replace(/\n/g, '\n\n'),
+  ].map(item => item.trim()).filter(Boolean))]
+}
+
+function removeAdjacentRestoreOriginalResidue(source: string, original: string, token: string): string {
+  if (!source || !original || !source.includes(token)) return source
+
+  let next = source.replace(/\r\n?/g, '\n')
+  const tokenPattern = escapeRegExp(token)
+  for (const variant of buildRestoreOriginalVariants(original)) {
+    const originalPattern = escapeRegExp(variant)
+    next = next
+      .replace(new RegExp(`${tokenPattern}(?:[ \\t]*\\n){0,3}[ \\t]*${originalPattern}`, 'g'), token)
+      .replace(new RegExp(`${originalPattern}(?:[ \\t]*\\n){0,3}[ \\t]*${tokenPattern}`, 'g'), token)
+  }
+
+  return next.replace(new RegExp(`(?:\\n\\s*){3,}`, 'g'), '\n\n')
 }
 
 export const useTemplateStore = defineStore('template', () => {
@@ -242,6 +281,10 @@ export const useTemplateStore = defineStore('template', () => {
 
   function popDeleted(): DeletedPlaceholder | undefined {
     return deletedStack.value.pop()
+  }
+
+  function clearDeletedStack() {
+    deletedStack.value = []
   }
 
   function isPlaceholderKeyInUse(key: string): boolean {
@@ -414,32 +457,40 @@ export const useTemplateStore = defineStore('template', () => {
     placeholders.value = sortPlaceholders(placeholders.value)
   }
 
-  function restoreByRecordedPosition(ph: DeletedPlaceholder, token: string): boolean {
+  function restoreByRecordedPosition(sourceSections: Section[], ph: DeletedPlaceholder, token: string): { sections: Section[]; replaced: boolean } {
     const canRestoreByPosition =
       typeof ph.restoreSectionIndex === 'number' &&
       ph.restoreSectionIndex >= 0 &&
-      ph.restoreSectionIndex < sections.value.length &&
+      ph.restoreSectionIndex < sourceSections.length &&
       (ph.restoreField === 'title' || ph.restoreField === 'template_content') &&
       typeof ph.restoreOffset === 'number'
 
-    if (!canRestoreByPosition) return false
+    if (!canRestoreByPosition) return { sections: sourceSections, replaced: false }
 
-    sections.value = sections.value.map((sec, index) => {
+    let replaced = false
+    const nextSections = sourceSections.map((sec, index) => {
       if (index !== ph.restoreSectionIndex) return sec
 
       if (ph.restoreField === 'title') {
+        const title = typeof sec.title === 'string' ? sec.title : ''
+        const nextTitle = replaceAt(title, ph.restoreOffset || 0, ph.original, token)
+        if (nextTitle === null) return sec
+        replaced = true
         return {
           ...sec,
-          title: replaceAtOrInsert(typeof sec.title === 'string' ? sec.title : '', ph.restoreOffset || 0, ph.original, token),
+          title: nextTitle,
         }
       }
 
+      const nextTemplateContent = replaceAt(sec.template_content || '', ph.restoreOffset || 0, ph.original, token)
+      if (nextTemplateContent === null) return sec
+      replaced = true
       return {
         ...sec,
-        template_content: replaceAtOrInsert(sec.template_content || '', ph.restoreOffset || 0, ph.original, token),
+        template_content: nextTemplateContent,
       }
     })
-    return true
+    return { sections: nextSections, replaced }
   }
 
   // 删除后重排该章节内所有 key 的序号
@@ -510,10 +561,32 @@ export const useTemplateStore = defineStore('template', () => {
     placeholders.value = sortPlaceholders([...placeholders.value, { ...ph, key: normalizePlaceholderKey(ph.key) }])
   }
 
-  function restorePlaceholder(ph: DeletedPlaceholder) {
+  function restorePlaceholder(ph: DeletedPlaceholder): boolean {
     const normalizedKey = normalizePlaceholderKey(ph.key)
     const parts = parseKeyParts(normalizedKey)
     const sectionNum = parts?.section ?? parseSectionNumFromKey(normalizedKey)
+    const canRestoreInSections =
+      sections.value.length > 0 &&
+      Boolean(ph.original) &&
+      sections.value.some(sec =>
+        (sec.title || '').includes(ph.original) ||
+        (sec.template_content || '').includes(ph.original)
+      )
+    const canRestoreInMarkdown =
+      sections.value.length === 0 &&
+      Boolean(ph.original) &&
+      (
+        (
+          typeof ph.restoreMarkdownOffset === 'number' &&
+          replaceAt(templateMarkdown.value, ph.restoreMarkdownOffset, ph.original, '') !== null
+        ) ||
+        templateMarkdown.value.includes(ph.original)
+      )
+
+    if (!canRestoreInSections && !canRestoreInMarkdown) {
+      return false
+    }
+
     let restoreKey = normalizedKey
 
     if (isPlaceholderKeyInUse(normalizedKey)) {
@@ -533,42 +606,122 @@ export const useTemplateStore = defineStore('template', () => {
     } = ph
     const normalizedPh: Placeholder = { ...placeholderData, key: restoreKey }
     const token = `{{${normalizedPh.key}}}`
+    let nextSections = sections.value.map(sec => ({ ...sec, placeholders: [...(sec.placeholders || [])] }))
+    let nextTemplateMarkdown = templateMarkdown.value
+    let restoredSectionIndex = typeof ph.restoreSectionIndex === 'number' ? ph.restoreSectionIndex : -1
+    let restoredField: RestoreField = ph.restoreField || 'template_content'
 
     // 优先在 sections.template_content 中查找并替换第一个匹配项
     const preferredIndex = sectionNum !== null ? sectionNum : -1
-    const preferredSection = sections.value[preferredIndex]
-    const canUsePreferred = Boolean(preferredSection?.template_content?.includes(normalizedPh.original))
-    let replaced = restoreByRecordedPosition(ph, token)
+    const preferredSection = nextSections[preferredIndex]
+    const canUsePreferred = Boolean(
+      preferredSection &&
+      (
+        (preferredSection.template_content || '').includes(normalizedPh.original) ||
+        (typeof preferredSection.title === 'string' && preferredSection.title.includes(normalizedPh.original))
+      )
+    )
+    const recordedRestore = restoreByRecordedPosition(nextSections, ph, token)
+    nextSections = recordedRestore.sections
+    let replaced = recordedRestore.replaced
+    if (replaced) {
+      restoredSectionIndex = typeof ph.restoreSectionIndex === 'number' ? ph.restoreSectionIndex : restoredSectionIndex
+      restoredField = ph.restoreField || restoredField
+    }
 
     if (!replaced) {
-      sections.value = sections.value.map((sec, index) => {
+      nextSections = nextSections.map((sec, index) => {
+        const title = typeof sec.title === 'string' ? sec.title : ''
         const templateContent = sec.template_content || ''
         const shouldTryPreferred = canUsePreferred && preferredIndex === index
-        const shouldTryFallback = !canUsePreferred && !replaced && templateContent.includes(normalizedPh.original)
+        const shouldTryFallback = !canUsePreferred && !replaced
 
         if (!shouldTryPreferred && !shouldTryFallback) {
           return sec
         }
 
-        replaced = true
-        return {
-          ...sec,
-          template_content: replaceFirst(templateContent, normalizedPh.original, token),
+        const nextTitle = replaceFirst(title, normalizedPh.original, token)
+        if (nextTitle !== title) {
+          replaced = true
+          restoredSectionIndex = index
+          restoredField = 'title'
+          return {
+            ...sec,
+            title: nextTitle,
+          }
         }
+
+        const nextTemplateContent = replaceFirst(templateContent, normalizedPh.original, token)
+        if (nextTemplateContent !== templateContent) {
+          replaced = true
+          restoredSectionIndex = index
+          restoredField = 'template_content'
+          return {
+            ...sec,
+            template_content: nextTemplateContent,
+          }
+        }
+
+        return sec
       })
     }
 
-    // 如果 sections 中没有找到匹配的原文（已被删除或文本有变化），尝试在 templateMarkdown 中替换
-    if (typeof ph.restoreMarkdownOffset === 'number') {
-      templateMarkdown.value = replaceAtOrInsert(templateMarkdown.value, ph.restoreMarkdownOffset, ph.original, token)
-    } else if (!replaced) {
-      templateMarkdown.value = replaceFirst(templateMarkdown.value, normalizedPh.original, token)
+    if (replaced && restoredSectionIndex === -1 && typeof ph.restoreSectionIndex === 'number') {
+      restoredSectionIndex = ph.restoreSectionIndex
+      restoredField = ph.restoreField || restoredField
     }
 
-    addPlaceholder(normalizedPh)
-    placeholders.value = mergePlaceholdersWithSectionKeys(placeholders.value, sections.value)
-    sections.value = syncSectionPlaceholders(sections.value, placeholders.value)
+    if (!replaced && nextSections.length === 0) {
+      const nextByOffset =
+        typeof ph.restoreMarkdownOffset === 'number'
+          ? replaceAt(nextTemplateMarkdown, ph.restoreMarkdownOffset, ph.original, token)
+          : null
+      if (nextByOffset !== null) {
+        nextTemplateMarkdown = nextByOffset
+        replaced = true
+      } else if (nextTemplateMarkdown.includes(normalizedPh.original)) {
+        nextTemplateMarkdown = replaceFirst(nextTemplateMarkdown, normalizedPh.original, token)
+        replaced = true
+      }
+    }
+
+    if (!replaced) {
+      return false
+    }
+
+    if (nextSections.length > 0) {
+      nextSections = nextSections.map((sec, index) => {
+        if (index !== restoredSectionIndex) return sec
+
+        return {
+          ...sec,
+          title: restoredField === 'title' && typeof sec.title === 'string'
+            ? removeAdjacentRestoreOriginalResidue(sec.title, normalizedPh.original, token)
+            : sec.title,
+          template_content: restoredField === 'template_content'
+            ? removeAdjacentRestoreOriginalResidue(sec.template_content || '', normalizedPh.original, token)
+            : sec.template_content,
+        }
+      })
+      nextTemplateMarkdown = buildTemplateMarkdownFromSections(nextSections)
+    } else {
+      nextTemplateMarkdown = removeAdjacentRestoreOriginalResidue(nextTemplateMarkdown, normalizedPh.original, token)
+    }
+
+    const nextPlaceholders = mergePlaceholdersWithSectionKeys(
+      sortPlaceholders([...placeholders.value, normalizedPh]),
+      nextSections
+    )
+    templateMarkdown.value = nextTemplateMarkdown
+    placeholders.value = nextPlaceholders
+    sections.value = nextSections.length > 0
+      ? syncSectionPlaceholders(nextSections, nextPlaceholders)
+      : nextSections
+    if (sections.value.length > 0) {
+      templateMarkdown.value = buildTemplateMarkdownFromSections(sections.value)
+    }
     selectChip(normalizedPh.key)
+    return true
   }
 
   function addPlaceholderFromOriginal(ph: Placeholder) {
@@ -680,7 +833,7 @@ export const useTemplateStore = defineStore('template', () => {
     templateMarkdown, placeholders, sections, deletedStack,
     selectedChipKey, selectedChipVersion, pendingRemoveKey, suppressEditorSync,
     templateName, templateDescription, templateId, isEditMode, customId, availableFields,
-    setUploadResult, loadFromDetail, resetForCreate, pushDeleted, popDeleted,
+    setUploadResult, loadFromDetail, resetForCreate, pushDeleted, popDeleted, clearDeletedStack,
     removePlaceholder, addPlaceholder, restorePlaceholder, updatePlaceholder, renamePlaceholder, selectChip,
     addPlaceholderFromOriginal, generateKey, getSectionNum, findSectionNumByOriginal, buildSubmitSections,
     normalizePlaceholderKey, comparePlaceholderKey, sortPlaceholders, reindexSection,

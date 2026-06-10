@@ -1,5 +1,5 @@
 import { Node, mergeAttributes } from '@tiptap/core'
-import { renderOriginalMarkdown } from '../utils/markdownOriginal'
+import { renderChipInlineMarkdown } from '../utils/markdownOriginal'
 
 export interface ChipAttrs {
   key: string
@@ -143,7 +143,7 @@ export const ChipNode = Node.create({
       dom.classList.add('chip')
       applyTypeClass(dom, type)
       dom.title = `key: ${key}`
-      dom.innerHTML = renderOriginalMarkdown(originalHtml || original) || original || `{{${key}}}`
+      dom.innerHTML = renderChipInlineMarkdown(originalHtml || original) || original || `{{${key}}}`
 
       return { dom }
     }

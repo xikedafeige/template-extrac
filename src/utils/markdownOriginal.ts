@@ -3,6 +3,12 @@ import MarkdownIt from 'markdown-it'
 const md = new MarkdownIt({ html: true, breaks: true, linkify: false })
 const INLINE_MARKDOWN_PATTERN = /(\*\*|__).+?\1/
 const SKIP_MARKDOWN_SELECTOR = 'table, pre, code, script, style, [data-chip], [data-html-block]'
+const BLOCK_TAGS = new Set([
+  'address', 'article', 'aside', 'blockquote', 'dd', 'div', 'dl', 'dt',
+  'fieldset', 'figcaption', 'figure', 'footer', 'form', 'h1', 'h2', 'h3',
+  'h4', 'h5', 'h6', 'header', 'hr', 'li', 'main', 'nav', 'ol', 'p', 'pre',
+  'section', 'table', 'ul',
+])
 
 function stripParagraphWrapper(html: string): string {
   const trimmed = html.trim()
@@ -34,6 +40,11 @@ export function renderInlineMarkdownInHtml(html: string): string {
   return normalizeMarkdownInHtml(html)
 }
 
+export function renderChipInlineMarkdown(value?: string | null): string {
+  if (!value) return ''
+  return flattenHtmlToInline(renderMixedMarkdownHtml(value))
+}
+
 function normalizeMarkdownInHtml(html: string): string {
   if (!html.includes('**') && !html.includes('__')) return html
   if (typeof document === 'undefined') return html
@@ -45,6 +56,69 @@ function normalizeMarkdownInHtml(html: string): string {
   renderInlineMarkdownTextNodes(wrapper)
 
   return wrapper.innerHTML
+}
+
+function flattenHtmlToInline(html: string): string {
+  if (typeof document === 'undefined') {
+    return stripParagraphWrapper(html)
+      .replace(/<\/(?:p|div|h[1-6]|li)>\s*<(?:p|div|h[1-6]|li)[^>]*>/gi, '<br>')
+      .replace(/<\/?(?:p|div|h[1-6]|li)[^>]*>/gi, '')
+  }
+
+  const wrapper = document.createElement('div')
+  const output = document.createElement('span')
+  wrapper.innerHTML = html
+
+  const appendBreak = () => {
+    if (!output.childNodes.length) return
+    if (output.lastChild?.nodeName !== 'BR') {
+      output.appendChild(document.createElement('br'))
+    }
+  }
+
+  const appendInlineNode = (node: Node, target: HTMLElement | DocumentFragment) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      target.appendChild(document.createTextNode(node.textContent || ''))
+      return
+    }
+
+    if (!(node instanceof Element)) return
+
+    const tagName = node.tagName.toLowerCase()
+    if (tagName === 'br') {
+      target.appendChild(document.createElement('br'))
+      return
+    }
+
+    if (BLOCK_TAGS.has(tagName)) {
+      appendBreak()
+      if (tagName === 'hr') {
+        appendBreak()
+        return
+      }
+      Array.from(node.childNodes).forEach(child => appendInlineNode(child, output))
+      appendBreak()
+      return
+    }
+
+    const clone = document.createElement(tagName)
+    Array.from(node.attributes).forEach((attr) => {
+      clone.setAttribute(attr.name, attr.value)
+    })
+    Array.from(node.childNodes).forEach(child => appendInlineNode(child, clone))
+    target.appendChild(clone)
+  }
+
+  Array.from(wrapper.childNodes).forEach(node => appendInlineNode(node, output))
+
+  while (output.firstChild?.nodeName === 'BR') {
+    output.removeChild(output.firstChild)
+  }
+  while (output.lastChild?.nodeName === 'BR') {
+    output.removeChild(output.lastChild)
+  }
+
+  return output.innerHTML
 }
 
 function renderSplitStrongParagraphs(root: HTMLElement) {
