@@ -700,6 +700,22 @@ function decodeHtmlEntities(value: string): string {
 		.replace(/&amp;/g, '&')
 }
 
+function containsTableHtml(value: string): boolean {
+	return /<table\b[\s\S]*?<\/table>/i.test(decodeHtmlEntities(value || ''))
+}
+
+function insertHtmlBlockPlaceholder(key: string, html: string, type = 'TYPE_DESCRIPTION') {
+	const encoded = btoa(encodeURIComponent(html))
+	editor.value?.chain().focus().deleteSelection().insertContent({
+		type: 'htmlBlock',
+		attrs: {
+			encoded,
+			chipType: type,
+			chipKey: key,
+		},
+	}).run()
+}
+
 function extractSelectedHtml(from: number, to: number): string {
 	if (!editor.value) return ''
 	const slice = editor.value.state.doc.slice(from, to)
@@ -737,7 +753,7 @@ function selectionContainsExistingKey(from: number, to: number): boolean {
 	let hasExistingKey = false
 
 	editor.value.state.doc.nodesBetween(from, to, (node) => {
-		if (node.type.name === 'chip' || node.type.name === 'htmlBlock') {
+		if (node.type.name === 'chip' || (node.type.name === 'htmlBlock' && node.attrs.chipKey)) {
 			hasExistingKey = true
 			return false
 		}
@@ -995,16 +1011,7 @@ function addChipFromSelection() {
 		store.clearDeletedStack()
 
 		// 用 ChipNode 显示原始 HTML 标签文本
-		editor.value.chain().focus().deleteSelection().insertChip({
-			key,
-			original: tableHtml,
-			originalHtml: tableHtml,
-			type: 'TYPE_DESCRIPTION',
-			fill_mode: 'newline',
-			field: null,
-			prompt: null,
-			note: '',
-		}).run()
+		insertHtmlBlockPlaceholder(key, tableHtml)
 
 		suppressNextStructuralRebuild = true
 		store.addPlaceholder({
@@ -1038,16 +1045,20 @@ function addChipFromSelection() {
 	if (!key) return
 	store.clearDeletedStack()
 
-	editor.value.chain().focus().deleteSelection().insertChip({
-		key,
-		original: selectedContent,
-		originalHtml: selectedHtml || undefined,
-		type: 'TYPE_DESCRIPTION',
-		fill_mode: 'newline',
-		field: null,
-		prompt: null,
-		note: '',
-	}).run()
+	if (containsTableHtml(selectedHtml || selectedContent)) {
+		insertHtmlBlockPlaceholder(key, selectedHtml || selectedContent)
+	} else {
+		editor.value.chain().focus().deleteSelection().insertChip({
+			key,
+			original: selectedContent,
+			originalHtml: selectedHtml || undefined,
+			type: 'TYPE_DESCRIPTION',
+			fill_mode: 'newline',
+			field: null,
+			prompt: null,
+			note: '',
+		}).run()
+	}
 
 	suppressNextStructuralRebuild = true
 	store.addPlaceholder({
