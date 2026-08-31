@@ -4,6 +4,12 @@
     @create="openCreate"
     @edit="openEdit"
   />
+  <div v-else-if="view === 'workbench'" class="workbench-host">
+    <TemplateWorkbench
+      :template-id="workbenchTemplateId"
+      @back="backToList"
+    />
+  </div>
   <div v-else class="app" @dragstart.capture.prevent @drop.capture.prevent>
     <TemplateUpload
       :mode="view === 'edit' ? 'edit' : 'create'"
@@ -29,19 +35,20 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { getTemplateDetail } from './api/template'
 import TemplateUpload from './components/TemplateUpload.vue'
 import TemplateEditor from './components/TemplateEditor.vue'
 import MappingTable from './components/MappingTable.vue'
 import TemplateList from './views/TemplateList.vue'
+import TemplateWorkbench from './views/TemplateWorkbench.vue'
 import { useTemplateStore } from './stores/template'
 
-type AppView = 'list' | 'create' | 'edit'
+type AppView = 'list' | 'create' | 'edit' | 'workbench'
 
 const store = useTemplateStore()
 const view = ref<AppView>('list')
 const detailLoading = ref(false)
 const workbenchVersion = ref(0)
+const workbenchTemplateId = ref('')
 
 function openCreate() {
   store.resetForCreate()
@@ -49,28 +56,14 @@ function openCreate() {
   view.value = 'create'
 }
 
-async function openEdit(templateId: string) {
-  view.value = 'edit'
-  detailLoading.value = true
-  try {
-    const res = await getTemplateDetail(templateId)
-    if (res.code === 0 && res.data) {
-      store.loadFromDetail(res.data)
-      refreshWorkbench()
-    } else {
-      alert('获取模板详情失败')
-      backToList()
-    }
-  } catch (err: any) {
-    alert('获取模板详情失败: ' + (err.response?.data?.message || err.message))
-    backToList()
-  } finally {
-    detailLoading.value = false
-  }
+function openEdit(templateId: string) {
+  workbenchTemplateId.value = templateId
+  view.value = 'workbench'
 }
 
 function backToList() {
   store.resetForCreate()
+  workbenchTemplateId.value = ''
   view.value = 'list'
 }
 
@@ -80,6 +73,19 @@ function refreshWorkbench() {
 </script>
 
 <style>
+html, body, #app {
+  height: 100%;
+  margin: 0;
+}
+
+.workbench-host {
+  height: 100vh;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .app {
   height: 100vh;
   display: flex;

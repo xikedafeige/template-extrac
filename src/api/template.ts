@@ -44,9 +44,17 @@ export async function getTemplateDetail(templateId: string): Promise<DetailRespo
   return data
 }
 
-export async function listTemplates(page = 1, pageSize = 20): Promise<ListResponse> {
+export async function listTemplates(
+  page = 1,
+  pageSize = 20,
+  templateName = '',
+): Promise<ListResponse> {
   const { data } = await api.get<ListResponse>('/api/template/list', {
-    params: { page, page_size: pageSize },
+    params: {
+      page,
+      page_size: pageSize,
+      ...(templateName.trim() ? { template_name: templateName.trim() } : {}),
+    },
   })
   return data
 }
