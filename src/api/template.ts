@@ -11,8 +11,14 @@ import type {
   GeneratePromptResponse,
 } from '../types/template'
 
+const FIXED_AUTH_HEADERS = {
+  token: 'feb9ff10-508d-4f32-8050-10bfea07b2e1',
+  tenantid: '1',
+}
+
 const api = axios.create({
   baseURL: import.meta.env.PROD ? '/performance-api' : '',
+  headers: FIXED_AUTH_HEADERS,
 })
 
 export async function uploadTemplate(file: File): Promise<UploadResponse> {

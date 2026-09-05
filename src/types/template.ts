@@ -67,6 +67,17 @@ export interface TemplateListItem {
   template_name: string
   template_description?: string
   template_word_url?: string
+  /**
+   * 模板类型 code。取值与展示名统一定义在 src/types/templateType.ts：
+   * WORK_LOG 工作记录表 / PRE_ASSESS 事前评估 /
+   * MID_MONITOR 事中监控 / POST_REVIEW 事后评价。
+   * 为空表示未分类，列表页类型列留空。
+   */
+  template_type?: string
+  /** 派生自哪个底版；空表示本身就是底版 */
+  base_template_id?: string
+  /** 底版名称，用于展示“派生自 XX” */
+  base_template_name?: string
   created_at?: string
   updated_at?: string
 }

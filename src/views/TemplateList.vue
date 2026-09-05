@@ -1,26 +1,33 @@
 <template>
   <div class="template-list-page">
     <div class="page-header">
-      <h1>模板管理</h1>
-      <button class="btn-primary" @click="emit('create')">新建模板</button>
+      <div>
+        <h1>模板管理</h1>
+        <p>管理和维护你的模板，支持按名称快速检索</p>
+      </div>
     </div>
 
     <div class="toolbar">
       <div class="search-box">
+        <span class="search-icon" aria-hidden="true">⌕</span>
         <input
           v-model="keyword"
           class="search-input"
           type="text"
-          placeholder="按模板名称搜索，支持部分匹配"
+          placeholder="搜索模板名称..."
           @keyup.enter="doSearch"
         />
-        <button v-if="keyword" class="search-clear" title="清空" @click="clearSearch">×</button>
+        <button v-if="keyword" class="search-clear" title="清空" aria-label="清空搜索" @click="clearSearch">×</button>
       </div>
       <button class="btn-secondary" @click="doSearch">查询</button>
       <span v-if="activeKeyword" class="search-tag">
         当前筛选：{{ activeKeyword }}
-        <button class="tag-clear" @click="clearSearch">×</button>
+        <button class="tag-clear" aria-label="清除筛选" @click="clearSearch">×</button>
       </span>
+      <button class="btn-primary" @click="emit('create')">
+        <span class="plus-icon" aria-hidden="true">＋</span>
+        新建模板
+      </button>
     </div>
 
     <div class="list-container">
@@ -32,6 +39,8 @@
         <thead>
           <tr>
             <th>模板名称</th>
+            <th>模板类型</th>
+            <th>来源模板</th>
             <th>描述</th>
             <th>创建时间</th>
             <th>更新时间</th>
@@ -43,12 +52,30 @@
             <td class="name-cell" :title="item.template_name || '未命名'">
               <span v-html="highlight(item.template_name || '未命名')" />
             </td>
+            <td>
+              <span
+                v-if="typeMeta(item.template_type)"
+                class="type-tag"
+                :class="`type-tag--${typeMeta(item.template_type)!.tone}`"
+                :title="typeMeta(item.template_type)!.hint || ''"
+              >{{ typeMeta(item.template_type)!.label }}</span>
+              <span v-else-if="item.template_type" class="type-tag type-tag--unknown" :title="`未定义的类型：${item.template_type}`">{{ item.template_type }}</span>
+            </td>
+            <td class="source-cell" :title="item.base_template_name || item.base_template_id || ''">
+              <span v-if="item.base_template_id" class="derived-tag">{{ item.base_template_name || item.base_template_id }}</span>
+            </td>
             <td class="desc-cell" :title="item.template_description || ''">{{ item.template_description || '-' }}</td>
             <td>{{ formatTime(item.created_at) }}</td>
             <td>{{ formatTime(item.updated_at) }}</td>
             <td class="action-cell">
-              <button class="btn-link" @click="emit('edit', item.template_id)">编辑</button>
-              <button class="btn-link btn-danger" @click="handleDelete(item)">删除</button>
+              <button class="btn-link" @click="emit('edit', item.template_id, item.template_type)">编辑</button>
+              <button
+                v-if="isBase(item)"
+                class="btn-link btn-disabled"
+                disabled
+                title="底版模板不允许删除"
+              >删除</button>
+              <button v-else class="btn-link btn-danger" @click="askDelete(item)">删除</button>
             </td>
           </tr>
         </tbody>
@@ -75,17 +102,39 @@
         </div>
       </div>
     </div>
+
+    <!-- 删除确认：居中弹窗。原先用浏览器原生 confirm()，它固定贴在窗口顶部，
+         与页面样式也不一致。 -->
+    <div v-if="pending" class="modal-mask" @click.self="cancelDelete">
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="del-title">
+        <div class="modal-title" id="del-title">删除模板</div>
+        <div class="modal-body">
+          确定删除模板<strong>「{{ pending.template_name || '未命名' }}」</strong>？
+          <div class="modal-hint">删除后不可恢复。</div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn-secondary" :disabled="deleting" @click="cancelDelete">取消</button>
+          <button class="btn-danger-solid" :disabled="deleting" @click="confirmDelete">
+            {{ deleting ? '删除中...' : '确定删除' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 轻提示：取代 alert()，不阻断操作，几秒后自消 -->
+    <div v-if="toast" class="toast" :class="`toast--${toast.kind}`">{{ toast.text }}</div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { deleteTemplate, listTemplates } from '../api/template'
 import type { TemplateListItem } from '../types/template'
+import { templateTypeMeta as typeMeta } from '../types/templateType'
 
 const emit = defineEmits<{
   create: []
-  edit: [templateId: string]
+  edit: [templateId: string, templateType?: string]
 }>()
 
 const items = ref<TemplateListItem[]>([])
@@ -121,8 +170,9 @@ function highlight(name: string) {
   return safe.replace(new RegExp(pattern, 'gi'), match => `<mark>${match}</mark>`)
 }
 
-async function fetchList() {
-  loading.value = true
+async function fetchList(options: { silent?: boolean } = {}) {
+  // silent 用于删除后的补数据：不置 loading，避免表格闪一下。
+  if (!options.silent) loading.value = true
   try {
     const res = await listTemplates(page.value, pageSize.value, activeKeyword.value)
     if (res.code === 0) {
@@ -131,13 +181,13 @@ async function fetchList() {
       // 删除或筛选后当前页可能已越界，回退到最后一页
       if (!items.value.length && total.value > 0 && page.value > totalPages.value) {
         page.value = totalPages.value
-        await fetchList()
+        await fetchList(options)
       }
     }
   } catch (err) {
     console.error('获取列表失败:', err)
   } finally {
-    loading.value = false
+    if (!options.silent) loading.value = false
   }
 }
 
@@ -160,21 +210,61 @@ function changePage(nextPage: number) {
   fetchList()
 }
 
-async function handleDelete(item: TemplateListItem) {
-  if (!confirm(`确定删除模板「${item.template_name || '未命名'}」？`)) return
+/** 底版：没有 base_template_id 就是底版，不允许删除 */
+function isBase(item: TemplateListItem) {
+  return !String(item.base_template_id || '').trim()
+}
 
+const pending = ref<TemplateListItem | null>(null)
+const deleting = ref(false)
+const toast = ref<{ text: string; kind: 'ok' | 'err' } | null>(null)
+let toastTimer: ReturnType<typeof setTimeout> | undefined
+
+function showToast(text: string, kind: 'ok' | 'err' = 'ok') {
+  toast.value = { text, kind }
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => { toast.value = null }, kind === 'err' ? 4000 : 2200)
+}
+
+function askDelete(item: TemplateListItem) {
+  if (isBase(item)) return
+  pending.value = item
+}
+
+function cancelDelete() {
+  if (deleting.value) return
+  pending.value = null
+}
+
+async function confirmDelete() {
+  const item = pending.value
+  if (!item || deleting.value) return
+  deleting.value = true
   try {
     const res = await deleteTemplate(item.template_id)
     if (res.code === 0) {
-      if (items.value.length === 1 && page.value > 1) {
+      // 局部移除而不重拉：fetchList() 会把 loading 置 true，表格整体被
+      // “加载中...”替掉再画回来，看起来就像整页刷新。
+      items.value = items.value.filter(row => row.template_id !== item.template_id)
+      total.value = Math.max(total.value - 1, 0)
+      pending.value = null
+      showToast(`已删除「${item.template_name || '未命名'}」`)
+      // 本页被删空且不是第一页：静默回退一页，补上内容。
+      if (!items.value.length && page.value > 1) {
         page.value -= 1
+        await fetchList({ silent: true })
+      } else if (!items.value.length && total.value > 0) {
+        await fetchList({ silent: true })
       }
-      fetchList()
     } else {
-      alert('删除失败: ' + res.message)
+      showToast(res.message || '删除失败', 'err')
+      pending.value = null
     }
   } catch (err: any) {
-    alert('删除失败: ' + (err.response?.data?.message || err.message))
+    showToast(err.response?.data?.message || err.message || '删除失败', 'err')
+    pending.value = null
+  } finally {
+    deleting.value = false
   }
 }
 
@@ -184,121 +274,195 @@ function formatTime(value?: string) {
 }
 
 onMounted(fetchList)
+
+// 弹窗开着时支持 Esc 关闭，并锁住页面滚动（避免遮罩后面还能滚）。
+function onKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && pending.value && !deleting.value) cancelDelete()
+}
+
+watch(pending, value => {
+  document.body.style.overflow = value ? 'hidden' : ''
+})
+
+onMounted(() => window.addEventListener('keydown', onKeydown))
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeydown)
+  if (toastTimer) clearTimeout(toastTimer)
+  document.body.style.overflow = ''
+})
 </script>
 
 <style scoped>
 .template-list-page {
   min-height: 100vh;
-  padding: 32px 24px;
-  background: #f8fafc;
+  padding: 40px 28px 48px;
+  background: linear-gradient(180deg, #f8fbff 0%, #f4f7fb 100%);
 }
 
 .page-header {
   max-width: 1200px;
-  margin: 0 auto 16px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  margin: 0 auto 20px;
 }
 
 .page-header h1 {
   margin: 0;
-  color: #0f172a;
-  font-size: 22px;
-  font-weight: 700;
+  color: #172033;
+  font-size: 26px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+
+.page-header p {
+  margin: 7px 0 0;
+  color: #7b879b;
+  font-size: 13px;
 }
 
 .btn-primary {
-  height: 36px;
-  padding: 0 20px;
-  border: none;
-  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 42px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 10px;
   background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  box-shadow: 0 6px 14px rgba(37, 99, 235, 0.2);
   color: #ffffff;
   cursor: pointer;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 650;
+  white-space: nowrap;
+  transition: transform .18s ease, box-shadow .18s ease, background .18s ease;
 }
 
 .btn-primary:hover {
   background: linear-gradient(135deg, #1d4ed8, #1e40af);
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.28);
+  transform: translateY(-1px);
+}
+
+.plus-icon {
+  font-size: 19px;
+  font-weight: 400;
+  line-height: 1;
 }
 
 .toolbar {
   max-width: 1200px;
-  margin: 0 auto 12px;
+  min-height: 58px;
+  margin: 0 auto 18px;
+  padding: 8px;
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
+  flex-wrap: nowrap;
+  gap: 8px;
+  border: 1px solid #e3eaf4;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .88);
+  box-shadow: 0 8px 24px rgba(30, 64, 110, .06);
 }
 
 .search-box {
   position: relative;
-  width: 300px;
+  flex: 1 1 360px;
+  min-width: 180px;
+}
+
+.search-icon {
+  position: absolute;
+  top: 50%;
+  left: 14px;
+  z-index: 1;
+  color: #94a3b8;
+  font-size: 22px;
+  line-height: 1;
+  transform: translateY(-54%) rotate(-20deg);
 }
 
 .search-input {
+  box-sizing: border-box;
   width: 100%;
-  height: 36px;
-  padding: 0 30px 0 12px;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  background: #ffffff;
-  color: #334155;
-  font-size: 13px;
+  height: 42px;
+  padding: 0 38px 0 42px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: #f5f8fc;
+  color: #263247;
+  font-size: 14px;
   outline: none;
+  transition: border-color .18s ease, background .18s ease, box-shadow .18s ease;
+}
+
+.search-input::placeholder {
+  color: #9aa6b8;
 }
 
 .search-input:focus {
   border-color: #93b4fd;
+  background: #ffffff;
   box-shadow: 0 0 0 3px #eff6ff;
 }
 
 .search-clear {
   position: absolute;
   top: 50%;
-  right: 8px;
-  border: none;
-  background: none;
-  color: #94a3b8;
+  right: 12px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: #e2e8f0;
+  color: #64748b;
   cursor: pointer;
   font-size: 16px;
-  line-height: 1;
+  line-height: 19px;
   transform: translateY(-50%);
 }
 
 .search-clear:hover {
-  color: #dc2626;
+  background: #cbd5e1;
+  color: #334155;
 }
 
 .btn-secondary {
-  height: 36px;
-  padding: 0 16px;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
+  flex: 0 0 auto;
+  height: 42px;
+  padding: 0 22px;
+  border: 1px solid #d6dfed;
+  border-radius: 9px;
   background: #ffffff;
-  color: #334155;
+  color: #355173;
   cursor: pointer;
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 600;
+  transition: border-color .18s ease, color .18s ease, background .18s ease, transform .18s ease;
 }
 
 .btn-secondary:hover {
   border-color: #93b4fd;
+  background: #f5f8ff;
   color: #2563eb;
+  transform: translateY(-1px);
 }
 
 .search-tag {
+  flex: 0 1 auto;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 5px 8px 5px 10px;
-  border: 1px solid #bfdbfe;
-  border-radius: 99px;
-  background: #eff6ff;
-  color: #2563eb;
+  gap: 5px;
+  max-width: 240px;
+  padding: 8px 10px 8px 12px;
+  overflow: hidden;
+  border: 1px solid #cfe0ff;
+  border-radius: 9px;
+  background: #f1f6ff;
+  color: #3568c8;
   font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .tag-clear {
@@ -315,9 +479,10 @@ onMounted(fetchList)
   max-width: 1200px;
   margin: 0 auto;
   overflow: hidden;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
+  border: 1px solid #e1e8f2;
+  border-radius: 14px;
   background: #ffffff;
+  box-shadow: 0 10px 28px rgba(30, 64, 110, .07);
 }
 
 .template-table {
@@ -326,12 +491,13 @@ onMounted(fetchList)
 }
 
 .template-table th {
-  padding: 12px 16px;
+  padding: 14px 16px;
   border-bottom: 1px solid #e2e8f0;
-  background: #f8fafc;
-  color: #475569;
-  font-size: 13px;
-  font-weight: 600;
+  background: #f6f9fd;
+  color: #66758b;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .02em;
   text-align: left;
 }
 
@@ -354,6 +520,67 @@ onMounted(fetchList)
   max-width: 240px;
   overflow: hidden;
   font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.type-tag {
+  padding: 1px 6px;
+  border-radius: 9px;
+  background: #e8f2ff;
+  color: #1868c0;
+  font-size: 11px;
+  font-weight: 400;
+}
+
+/* 每类模板一个色调，列表里一眼能分清。色值全部取低饱和度，
+   与页面整体的淡色调一致，不抢模板名称的注意力。 */
+.type-tag--blue {
+  background: #e8f2ff;
+  color: #1868c0;
+}
+
+.type-tag--green {
+  background: #e6f6ed;
+  color: #1a7f45;
+}
+
+.type-tag--amber {
+  background: #fdf1de;
+  color: #96601a;
+}
+
+.type-tag--violet {
+  background: #f0ebfd;
+  color: #5b3ec0;
+}
+
+/* 数据库里出现了未定义的 code：用中性灰并直接回显原值，
+   方便发现脏数据，而不是默默不显示。 */
+.type-tag--unknown {
+  background: #f0f1f3;
+  color: #6b7280;
+}
+
+/* 派生标识用中性灰，不和蓝色的类型标签抢注意力 */
+.derived-tag {
+  padding: 1px 6px;
+  border-radius: 9px;
+  background: #f0f2f6;
+  color: #626b7a;
+  font-size: 11px;
+  font-weight: 400;
+  max-width: 180px;
+  display: inline-block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+.source-cell {
+  max-width: 220px;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -397,6 +624,137 @@ onMounted(fetchList)
 
 .btn-danger:hover {
   background: #fef2f2;
+}
+
+/* 底版的删除按钮：置灰不可点，但仍然占位，避免行间按钮位置跳动 */
+.btn-disabled {
+  color: #b6bcc7;
+  cursor: not-allowed;
+}
+
+.btn-disabled:hover {
+  background: transparent;
+}
+
+/* ---- 居中确认弹窗 ---- */
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(17, 24, 39, 0.42);
+  animation: mask-in .16s ease;
+}
+
+.modal-card {
+  width: 100%;
+  max-width: 380px;
+  padding: 22px 24px 18px;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.22);
+  animation: card-in .18s ease;
+}
+
+.modal-title {
+  margin-bottom: 10px;
+  color: #1f2937;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.modal-body {
+  color: #47536b;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.modal-body strong {
+  color: #1f2937;
+  font-weight: 600;
+}
+
+.modal-hint {
+  margin-top: 4px;
+  color: #8b93a3;
+  font-size: 12px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.modal-actions .btn-secondary {
+  height: 36px;
+  padding: 0 16px;
+  font-size: 13px;
+}
+
+.btn-danger-solid {
+  height: 36px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 9px;
+  background: #dc2626;
+  color: #ffffff;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background .18s ease;
+}
+
+.btn-danger-solid:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+.btn-danger-solid:disabled,
+.modal-actions .btn-secondary:disabled {
+  opacity: .6;
+  cursor: not-allowed;
+}
+
+@keyframes mask-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(-6px) scale(.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ---- 轻提示 ---- */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 32px;
+  z-index: 70;
+  padding: 10px 18px;
+  border-radius: 10px;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.18);
+  color: #ffffff;
+  font-size: 13px;
+  transform: translateX(-50%);
+  animation: toast-in .2s ease;
+}
+
+.toast--ok {
+  background: #16a34a;
+}
+
+.toast--err {
+  background: #dc2626;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translate(-50%, 8px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
 }
 
 .pagination {
@@ -465,5 +823,22 @@ onMounted(fetchList)
   color: #94a3b8;
   font-size: 14px;
   text-align: center;
+}
+@media (max-width: 720px) {
+  .template-list-page {
+    padding: 24px 14px 32px;
+  }
+
+  .toolbar {
+    flex-wrap: wrap;
+  }
+
+  .search-box {
+    flex-basis: calc(100% - 98px);
+  }
+
+  .btn-primary {
+    width: 100%;
+  }
 }
 </style>

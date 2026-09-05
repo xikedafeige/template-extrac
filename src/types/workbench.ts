@@ -103,8 +103,31 @@ export interface SaveResponse {
   data: {
     saved: boolean
     validation: TemplateValidation
+    // 每次保存都会派生出一个新模板，这里返回新 id 与根底版 id。
+    template_id?: string
+    base_template_id?: string
+    template_name?: string
   }
   message?: string
 }
 
 export type WorkbenchApiResponse<T> = AxiosResponse<T>
+
+/**
+ * 把草稿序列化成接口入参形状：splits[].variables 改名为
+ * variable_mapping_list，与数据库字段名、deep-research 远端接口保持一致。
+ *
+ * 前端内部状态继续用 variables（组件里有 20+ 处引用），只在发请求
+ * 这一层做转换，因此不影响页面逻辑；后端响应仍是 variables，也不需要
+ * 额外反向转换。后端 SplitDraft 已配 alias 且 populate_by_name，
+ * 两种写法都能解析，因此这个改动是向后兼容的。
+ */
+export function toDraftPayload(draft: TemplateDraft): Record<string, unknown> {
+  return {
+    ...draft,
+    splits: (draft.splits || []).map((split) => {
+      const { variables, ...rest } = split
+      return { ...rest, variable_mapping_list: variables || [] }
+    }),
+  }
+}

@@ -10,6 +10,12 @@
       @back="backToList"
     />
   </div>
+  <div v-else-if="view === 'worklog'" class="workbench-host">
+    <WorklogWorkbench
+      :template-id="workbenchTemplateId"
+      @back="backToList"
+    />
+  </div>
   <div v-else class="app" @dragstart.capture.prevent @drop.capture.prevent>
     <TemplateUpload
       :mode="view === 'edit' ? 'edit' : 'create'"
@@ -40,9 +46,11 @@ import TemplateEditor from './components/TemplateEditor.vue'
 import MappingTable from './components/MappingTable.vue'
 import TemplateList from './views/TemplateList.vue'
 import TemplateWorkbench from './views/TemplateWorkbench.vue'
+import WorklogWorkbench from './views/WorklogWorkbench.vue'
 import { useTemplateStore } from './stores/template'
+import { templateEditorFor } from './types/templateType'
 
-type AppView = 'list' | 'create' | 'edit' | 'workbench'
+type AppView = 'list' | 'create' | 'edit' | 'workbench' | 'worklog'
 
 const store = useTemplateStore()
 const view = ref<AppView>('list')
@@ -56,9 +64,11 @@ function openCreate() {
   view.value = 'create'
 }
 
-function openEdit(templateId: string) {
+function openEdit(templateId: string, templateType?: string) {
   workbenchTemplateId.value = templateId
-  view.value = 'workbench'
+  // 路由由类型表决定（src/types/templateType.ts）：工作记录表这类表单型
+  // 模板走还原版式的独立页，其余（含未定义类型）走通用工作台。
+  view.value = templateEditorFor(templateType)
 }
 
 function backToList() {
