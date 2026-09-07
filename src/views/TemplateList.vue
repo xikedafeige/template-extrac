@@ -24,7 +24,7 @@
         当前筛选：{{ activeKeyword }}
         <button class="tag-clear" aria-label="清除筛选" @click="clearSearch">×</button>
       </span>
-      <button class="btn-primary" @click="emit('create')">
+      <button class="btn-primary" @click="pickMode = true">
         <span class="plus-icon" aria-hidden="true">＋</span>
         新建模板
       </button>
@@ -123,6 +123,32 @@
 
     <!-- 轻提示：取代 alert()，不阻断操作，几秒后自消 -->
     <div v-if="toast" class="toast" :class="`toast--${toast.kind}`">{{ toast.text }}</div>
+
+    <!-- 新建方式选择：上传文档自动解析，或从空白手工搭 -->
+    <div v-if="pickMode" class="modal-mask" @click.self="pickMode = false">
+      <div class="modal-card modal-card--wide" role="dialog" aria-modal="true" aria-labelledby="pick-title">
+        <div class="modal-title" id="pick-title">新建模板</div>
+        <div class="mode-list">
+          <button class="mode-item" @click="chooseUpload">
+            <span class="mode-icon">↑</span>
+            <span class="mode-text">
+              <strong>上传文档解析</strong>
+              <em>选一份 Word，自动抽取正文与待填项，再微调变量映射</em>
+            </span>
+          </button>
+          <button class="mode-item" @click="chooseManual">
+            <span class="mode-icon">＋</span>
+            <span class="mode-text">
+              <strong>手工搭模板</strong>
+              <em>从空白开始，自己加章节和变量，不需要文档</em>
+            </span>
+          </button>
+        </div>
+        <div class="modal-actions">
+          <button class="btn-secondary" @click="pickMode = false">取消</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -134,8 +160,21 @@ import { templateTypeMeta as typeMeta } from '../types/templateType'
 
 const emit = defineEmits<{
   create: []
+  createManual: []
   edit: [templateId: string, templateType?: string]
 }>()
+
+const pickMode = ref(false)
+
+function chooseUpload() {
+  pickMode.value = false
+  emit('create')
+}
+
+function chooseManual() {
+  pickMode.value = false
+  emit('createManual')
+}
 
 const items = ref<TemplateListItem[]>([])
 const total = ref(0)
@@ -657,6 +696,65 @@ onBeforeUnmount(() => {
   background: #ffffff;
   box-shadow: 0 18px 44px rgba(15, 23, 42, 0.22);
   animation: card-in .18s ease;
+}
+
+.modal-card--wide { max-width: 440px; }
+
+/* 新建方式二选一 */
+.mode-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.mode-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 13px 14px;
+  border: 1px solid #e2e8f2;
+  border-radius: 11px;
+  background: #ffffff;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color .16s ease, background .16s ease;
+}
+
+.mode-item:hover {
+  border-color: #2563eb;
+  background: #f7faff;
+}
+
+.mode-icon {
+  flex: 0 0 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: #eff5ff;
+  color: #1d4ed8;
+  text-align: center;
+  font-size: 15px;
+  line-height: 30px;
+}
+
+.mode-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.mode-text strong {
+  color: #1f2937;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.mode-text em {
+  color: #8b93a3;
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.5;
 }
 
 .modal-title {

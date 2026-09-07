@@ -9,6 +9,7 @@ import type {
   SubmitResponse,
   GeneratePromptRequest,
   GeneratePromptResponse,
+  V2CreateRequest,
 } from '../types/template'
 
 const FIXED_AUTH_HEADERS = {
@@ -27,6 +28,36 @@ export async function uploadTemplate(file: File): Promise<UploadResponse> {
   const { data } = await api.post<UploadResponse>(
     '/api/template/upload',
     formData,
+  )
+  return data
+}
+
+/** 手工建模：不上传文档，直接提交章节/变量结构 */
+export async function createTemplateV2(
+  payload: V2CreateRequest,
+): Promise<SubmitResponse> {
+  const { data } = await api.post<SubmitResponse>(
+    '/api/template/v2/create',
+    payload,
+  )
+  return data
+}
+
+/**
+ * 上传 Word 并直接建好模板，返回 template_id 供工作台接手。
+ *
+ * 后端把原来 /upload + /submit 两步合成一个接口；/upload 本身保留不动。
+ * 解析要逐章调大模型，超时放到 5 分钟。
+ */
+export async function uploadTemplateToWorkbench(
+  file: File,
+): Promise<SubmitResponse> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const { data } = await api.post<SubmitResponse>(
+    '/api/template/upload-to-workbench',
+    formData,
+    { timeout: 300000 },
   )
   return data
 }

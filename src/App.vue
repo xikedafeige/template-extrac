@@ -2,8 +2,23 @@
   <TemplateList
     v-if="view === 'list'"
     @create="openCreate"
+    @create-manual="openManualCreate"
     @edit="openEdit"
   />
+  <div v-else-if="view === 'manual'" class="workbench-host">
+    <TemplateManualCreate
+      :key="workbenchVersion"
+      @back="backToList"
+      @created="onManualCreated"
+    />
+  </div>
+  <div v-else-if="view === 'create'" class="workbench-host">
+    <TemplateUploadCreate
+      :key="workbenchVersion"
+      @back="backToList"
+      @created="onUploadCreated"
+    />
+  </div>
   <div v-else-if="view === 'workbench'" class="workbench-host">
     <TemplateWorkbench
       :template-id="workbenchTemplateId"
@@ -47,10 +62,12 @@ import MappingTable from './components/MappingTable.vue'
 import TemplateList from './views/TemplateList.vue'
 import TemplateWorkbench from './views/TemplateWorkbench.vue'
 import WorklogWorkbench from './views/WorklogWorkbench.vue'
+import TemplateManualCreate from './views/TemplateManualCreate.vue'
+import TemplateUploadCreate from './views/TemplateUploadCreate.vue'
 import { useTemplateStore } from './stores/template'
 import { templateEditorFor } from './types/templateType'
 
-type AppView = 'list' | 'create' | 'edit' | 'workbench' | 'worklog'
+type AppView = 'list' | 'create' | 'edit' | 'workbench' | 'worklog' | 'manual'
 
 const store = useTemplateStore()
 const view = ref<AppView>('list')
@@ -59,9 +76,34 @@ const workbenchVersion = ref(0)
 const workbenchTemplateId = ref('')
 
 function openCreate() {
-  store.resetForCreate()
   workbenchVersion.value += 1
   view.value = 'create'
+}
+
+// 上传解析完成并落库后直接进工作台。旧的左右分栏页（TemplateEditor +
+// MappingTable）不再路由过去；组件暂时保留，确认新流程稳了再清。
+function onUploadCreated(templateId: string) {
+  if (!templateId) {
+    backToList()
+    return
+  }
+  workbenchTemplateId.value = templateId
+  view.value = 'workbench'
+}
+
+function openManualCreate() {
+  workbenchVersion.value += 1
+  view.value = 'manual'
+}
+
+// 手工建模存盘后直接进工作台继续细调，比回列表再点编辑少两步。
+function onManualCreated(templateId: string, templateType: string) {
+  if (!templateId) {
+    backToList()
+    return
+  }
+  workbenchTemplateId.value = templateId
+  view.value = templateEditorFor(templateType)
 }
 
 function openEdit(templateId: string, templateType?: string) {

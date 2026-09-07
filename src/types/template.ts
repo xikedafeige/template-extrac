@@ -39,6 +39,34 @@ export interface SubmitSection {
   placeholders: Placeholder[]
 }
 
+/* ---- V2 手工建模（对应后端 /api/template/v2/create） ----
+   字段名与 models/template.py 里的 V2TemplateSplit / V2VariableMapping 一致，
+   不要改成 variables：后端和远端都叫 variable_mapping_list。 */
+export interface V2VariableMapping {
+  key: string
+  type: string
+  value: string
+  chapter_index: number
+  prompt: string
+  title: string
+}
+
+export interface V2TemplateSplit {
+  content: string
+  index: number
+  section_title: string
+  serp_prompt?: string | null
+  variable_mapping_list?: V2VariableMapping[] | null
+}
+
+export interface V2CreateRequest {
+  name: string
+  description?: string
+  is_replace: boolean
+  content?: string
+  template_split_list: V2TemplateSplit[]
+}
+
 export interface SubmitRequest {
   template_markdown: string
   sections: SubmitSection[]

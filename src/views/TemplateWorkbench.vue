@@ -232,8 +232,15 @@ function commitSectionEdit(section: SplitDraft, text: string) {
   const matches = [...template.matchAll(/\{\{([^}]+)\}\}/g)]
   const placeholderInContent = /\{\{[^}]+\}\}/.test(section.content || '')
   if (!matches.length) {
-    if (placeholderInContent) section.content = text
-    section.display_content = text
+    // 模板本身没有占位符，这段文本就是章节正文。
+    // 远端 PlanTemplateSplit 只根据 content 存章节正文，display_content 不参与
+    // 报告生成；原来只在「content 已含占位符」时才写 content，像新增的
+    // “目录”这种零变量、content 为空的章节就永远存不下去。
+    // display_content 只在两边原本一致（或本来为空）时跟着改，避免误伤
+    // 历史脏数据里两边存不同内容的章节。
+    const bothSame = (section.content || '') === (section.display_content || '')
+    section.content = text
+    if (bothSame || !section.display_content) section.display_content = text
     markDirty()
     return
   }
@@ -322,7 +329,20 @@ function syncSectionDraftToVariables(section: SplitDraft, renderedText: string) 
   sectionEditTexts.set(section.id, renderedText)
   const { keys, parsed } = parseSectionText(snapshot.template, renderedText)
   let pending: Array<{ title: string; value: string }> = []
-  if (!keys.length) { section.display_content = renderedText; pendingVariables.value = { ...pendingVariables.value, [section.id]: pending }; return }
+  if (!keys.length) {
+    // 模板本身没有占位符。两种情形：
+    //   1. 真零变量章节（如手动新增的“目录”）——content 才是远端认的正文，
+    //      必须写它，否则保存后内容丢失。
+    //   2. 有变量但两边都没占位符的历史脏数据（孤儿变量，库里现存 2 个）——
+    //      这种章节 content 与 display_content 本来就是同一份文本，两边同步
+    //      写不会丢东西；但不能依赖这个巧合，只在两边原本一致时才同步写，
+    //      否则只动 content，保住 display_content 原样。
+    const bothSame = (section.content || '') === (section.display_content || '')
+    section.content = renderedText
+    if (bothSame || !section.display_content) section.display_content = renderedText
+    pendingVariables.value = { ...pendingVariables.value, [section.id]: pending }
+    return
+  }
 
   // 实时把每个 key 解析到的内容写回变量，避免只有第一个变量能同步显示。
   for (let index = 0; index < keys.length; index += 1) {
