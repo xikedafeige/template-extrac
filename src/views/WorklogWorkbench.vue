@@ -5,8 +5,8 @@
       <div class="grow" />
       <span v-if="dirty" class="badge orange">有未保存修改</span>
       <span class="status" :class="statusKind">{{ status }}</span>
-      <button class="btn" @click="leave">返回模板列表</button>
-      <button class="btn primary" :disabled="saving || !dirty" @click="persistSave">
+      <button class="btn" @click="leave">模板列表</button>
+      <button class="btn primary" :disabled="!draft || saving" @click="persistSave">
         {{ saving ? '保存中…' : '保存模板' }}
       </button>
     </header>
@@ -737,6 +737,14 @@ onMounted(load)
 .btn.primary {
   background: #3867ef;
   border-color: #3867ef;
+  color: #fff;
+}
+
+/* .btn:hover:not(:disabled) 的优先级（0,3,0）高于 .btn.primary（0,2,0），
+   不单独覆盖的话主按钮 hover 时文字会被染成和蓝底同色而看不见。 */
+.btn.primary:hover:not(:disabled) {
+  background: #2f59d4;
+  border-color: #2f59d4;
   color: #fff;
 }
 

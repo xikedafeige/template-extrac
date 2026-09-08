@@ -4,7 +4,7 @@
       <div class="brand"><i />模板智能维护工作台</div>
       <div class="grow" />
       <span class="status" :class="statusKind">{{ status }}</span>
-      <button class="btn" @click="leaveWorkbench">返回模板列表</button>
+      <button class="btn" @click="leaveWorkbench">模板列表</button>
       <button class="btn primary" :disabled="!draft || saving" @click="save">{{ saving ? '保存中…' : '保存模板' }}</button>
     </header>
 
