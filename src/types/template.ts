@@ -51,12 +51,20 @@ export interface V2VariableMapping {
   title: string
 }
 
+/** 二级标题分组 — 对应后端 V2TemplateSubsection，组内变量渲染为三级标题 */
+export interface V2TemplateSubsection {
+  title: string
+  order: number
+  variable_mapping_list?: V2VariableMapping[] | null
+}
+
 export interface V2TemplateSplit {
   content: string
   index: number
   section_title: string
   serp_prompt?: string | null
   variable_mapping_list?: V2VariableMapping[] | null
+  subsection_list?: V2TemplateSubsection[] | null
 }
 
 export interface V2CreateRequest {

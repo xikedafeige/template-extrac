@@ -63,9 +63,9 @@
               v-model="split.section_title"
               class="split-title"
               type="text"
-              :placeholder="`第 ${si + 1} 章节标题，例如：一、基本情况`"
+              :placeholder="`第 ${si + 1} 章节标题，例如：一、基本情况（可空）`"
             />
-            <span class="split-meta">{{ split.variables.length }} 变量</span>
+            <span class="split-meta">{{ splitVarCount(split) }} 变量</span>
             <button class="btn-mini" :disabled="si === 0" title="上移" @click="moveSplit(si, -1)">↑</button>
             <button class="btn-mini" :disabled="si === splits.length - 1" title="下移" @click="moveSplit(si, 1)">↓</button>
             <button class="btn-mini btn-mini-danger" @click="removeSplit(si)">删除</button>
@@ -77,35 +77,81 @@
               <textarea
                 v-model="split.content"
                 rows="3"
-                placeholder="选填。章节的固定正文，变量占位符会在保存时按 {{key}} 自动追加"
+                placeholder="选填。写什么就存什么，不会自动追加小标题和占位符"
               />
+            </div>
+            <div class="form-row">
+              <label>SERP 提示词</label>
+              <input v-model="split.serp_prompt" type="text" placeholder="选填。该章节的检索提示词" />
             </div>
 
             <div class="var-head">
-              <span>变量</span>
-              <button class="btn-mini btn-mini-primary" @click="addVariable(si)">＋ 添加变量</button>
+              <span>变量<em class="var-head-hint">标题作为二级标题</em></span>
+              <span class="head-btns">
+                <button class="btn-mini btn-mini-primary" @click="addVariable(si)">＋ 添加变量</button>
+                <button class="btn-mini" @click="addSubsection(si)">＋ 添加二级标题</button>
+              </span>
             </div>
 
-            <div v-if="!split.variables.length" class="empty empty-sm">该章节还没有变量</div>
+            <div v-if="!split.variables.length" class="empty empty-sm">该章节还没有未分组变量</div>
 
             <div v-for="(v, vi) in split.variables" :key="v.uid" class="var">
               <div class="var-top">
                 <span class="var-idx">{{ vi + 1 }}</span>
-                <input v-model="v.title" class="var-title" type="text" placeholder="变量标题，例如：（一）项目背景" />
+                <input v-model="v.title" class="var-title" type="text" placeholder="变量标题，例如：（一）项目背景（可空）" />
                 <select v-model="v.type" class="var-type">
-                  <option value="markdown">markdown</option>
-                  <option value="json">json</option>
-                  <option value="summary">summary</option>
+                  <option v-for="t in VAR_TYPES" :key="t.value" :value="t.value">{{ t.label }}</option>
                 </select>
                 <button class="btn-mini" :disabled="vi === 0" title="上移" @click="moveVariable(si, vi, -1)">↑</button>
                 <button class="btn-mini" :disabled="vi === split.variables.length - 1" title="下移" @click="moveVariable(si, vi, 1)">↓</button>
                 <button class="btn-mini btn-mini-danger" @click="removeVariable(si, vi)">删除</button>
               </div>
               <div class="var-fields">
+                <template v-if="v.type === 'json'">
+                  <label>变量标识 <em>*</em></label>
+                  <input v-model="v.key" type="text" placeholder="json 类型需自己指定 key" />
+                </template>
                 <label>value</label>
                 <textarea v-model="v.value" rows="2" placeholder="要生成的内容，或 [获取XX] 这类抽取占位" />
                 <label>prompt</label>
                 <textarea v-model="v.prompt" rows="2" placeholder="选填。生成约束" />
+              </div>
+            </div>
+
+            <!-- 二级标题分组：组内变量标题作为三级标题 -->
+            <div v-for="(sub, sui) in split.subsections" :key="sub.uid" class="sub">
+              <div class="sub-head">
+                <input v-model="sub.title" class="sub-title" type="text" placeholder="二级标题，例如：一、项目决策指标" />
+                <span class="split-meta">{{ sub.variables.length }} 变量</span>
+                <button class="btn-mini" :disabled="sui === 0" title="上移" @click="moveSubsection(si, sui, -1)">↑</button>
+                <button class="btn-mini" :disabled="sui === split.subsections.length - 1" title="下移" @click="moveSubsection(si, sui, 1)">↓</button>
+                <button class="btn-mini btn-mini-primary" @click="addSubVariable(si, sui)">＋ 变量</button>
+                <button class="btn-mini btn-mini-danger" @click="removeSubsection(si, sui)">删除</button>
+              </div>
+
+              <div v-if="!sub.variables.length" class="empty empty-sm">该分组还没有变量</div>
+
+              <div v-for="(v, vi) in sub.variables" :key="v.uid" class="var">
+                <div class="var-top">
+                  <span class="var-idx">{{ vi + 1 }}</span>
+                  <input v-model="v.title" class="var-title" type="text" placeholder="变量标题（三级，可空）" />
+                  <select v-model="v.type" class="var-type">
+                    <option v-for="t in VAR_TYPES" :key="t.value" :value="t.value">{{ t.label }}</option>
+                  </select>
+                  <button class="btn-mini" :disabled="vi === 0" title="上移" @click="moveSubVariable(si, sui, vi, -1)">↑</button>
+                  <button class="btn-mini" :disabled="vi === sub.variables.length - 1" title="下移" @click="moveSubVariable(si, sui, vi, 1)">↓</button>
+                  <button class="btn-mini btn-mini-danger" @click="removeSubVariable(si, sui, vi)">删除</button>
+                </div>
+                <div class="var-fields">
+                  <template v-if="v.type === 'json'">
+                    <label>变量标识 <em>*</em></label>
+                    <input v-model="v.key" type="text" placeholder="json 类型需自己指定 key" />
+                  </template>
+                  <label>value</label>
+                  <textarea v-model="v.value" rows="2" placeholder="要生成的内容，或 [获取XX] 这类抽取占位" />
+                  <label>prompt</label>
+                  <textarea v-model="v.prompt" rows="2" placeholder="选填。生成约束" />
+                </div>
               </div>
             </div>
           </div>
@@ -132,20 +178,38 @@ interface DraftVariable {
   uid: number
   title: string
   type: string
+  /** 仅 json 类型由用户自填；其余类型按位置生成，与 template_edit_v2.html 一致 */
+  key: string
   value: string
   prompt: string
+}
+
+interface DraftSubsection {
+  uid: number
+  title: string
+  variables: DraftVariable[]
 }
 
 interface DraftSplit {
   uid: number
   section_title: string
   content: string
+  serp_prompt: string
   open: boolean
   variables: DraftVariable[]
+  subsections: DraftSubsection[]
 }
 
 let seq = 0
 const nextUid = () => ++seq
+
+/** 与 template_edit_v2.html renderVariable() 的下拉选项保持一致 */
+const VAR_TYPES = [
+  { value: 'markdown', label: 'Markdown' },
+  { value: 'json', label: 'JSON' },
+  { value: 'summary', label: 'Summary' },
+  { value: 'fill', label: '填空（占位符替换/原样输出）' },
+]
 
 const name = ref('')
 const description = ref('')
@@ -157,7 +221,11 @@ const toast = ref<{ text: string; kind: 'ok' | 'err' } | null>(null)
 let toastTimer: ReturnType<typeof setTimeout> | undefined
 
 const variableCount = computed(() =>
-  splits.value.reduce((sum, s) => sum + s.variables.length, 0),
+  splits.value.reduce(
+    (sum, s) =>
+      sum + s.variables.length + s.subsections.reduce((n, sub) => n + sub.variables.length, 0),
+    0,
+  ),
 )
 const allOpen = computed(() => splits.value.length > 0 && splits.value.every(s => s.open))
 
@@ -172,15 +240,22 @@ function addSplit() {
     uid: nextUid(),
     section_title: '',
     content: '',
+    serp_prompt: '',
     open: true,
     variables: [],
+    subsections: [],
   })
+}
+
+function splitVarCount(split: DraftSplit) {
+  return split.variables.length + split.subsections.reduce((n, s) => n + s.variables.length, 0)
 }
 
 function removeSplit(index: number) {
   const split = splits.value[index]
   const label = split.section_title.trim() || `第 ${index + 1} 个章节`
-  if (split.variables.length && !window.confirm(`「${label}」下有 ${split.variables.length} 个变量，一并删除？`)) return
+  const total = splitVarCount(split)
+  if (total && !window.confirm(`「${label}」下有 ${total} 个变量，一并删除？`)) return
   splits.value.splice(index, 1)
 }
 
@@ -196,14 +271,12 @@ function toggleAll() {
   splits.value.forEach(s => { s.open = next })
 }
 
+function newVariable(): DraftVariable {
+  return { uid: nextUid(), title: '', type: 'markdown', key: '', value: '', prompt: '' }
+}
+
 function addVariable(si: number) {
-  splits.value[si].variables.push({
-    uid: nextUid(),
-    title: '',
-    type: 'markdown',
-    value: '',
-    prompt: '',
-  })
+  splits.value[si].variables.push(newVariable())
   splits.value[si].open = true
 }
 
@@ -218,41 +291,80 @@ function moveVariable(si: number, vi: number, delta: number) {
   ;[list[vi], list[target]] = [list[target], list[vi]]
 }
 
+function addSubsection(si: number) {
+  splits.value[si].subsections.push({ uid: nextUid(), title: '', variables: [] })
+  splits.value[si].open = true
+}
+
+function removeSubsection(si: number, sui: number) {
+  const sub = splits.value[si].subsections[sui]
+  if (sub.variables.length && !window.confirm(`该二级标题下有 ${sub.variables.length} 个变量，一并删除？`)) return
+  splits.value[si].subsections.splice(sui, 1)
+}
+
+function moveSubsection(si: number, sui: number, delta: number) {
+  const list = splits.value[si].subsections
+  const target = sui + delta
+  if (target < 0 || target >= list.length) return
+  ;[list[sui], list[target]] = [list[target], list[sui]]
+}
+
+function addSubVariable(si: number, sui: number) {
+  splits.value[si].subsections[sui].variables.push(newVariable())
+}
+
+function removeSubVariable(si: number, sui: number, vi: number) {
+  splits.value[si].subsections[sui].variables.splice(vi, 1)
+}
+
+function moveSubVariable(si: number, sui: number, vi: number, delta: number) {
+  const list = splits.value[si].subsections[sui].variables
+  const target = vi + delta
+  if (target < 0 || target >= list.length) return
+  ;[list[vi], list[target]] = [list[target], list[vi]]
+}
+
 /**
- * 组装后端要的结构。
+ * 组装后端要的结构，取齐 static/template_edit_v2.html 的 collectTemplateData()。
  *
- * key 与 chapter_index 都由前端按「章节序号 + 变量序号」生成，保证同一模板内
- * 唯一——后端 v2/create 不会替你补这两个字段，重复会导致变量互相覆盖。
- * content 里同时写入 {{key}} 占位符：远端 PlanTemplateSplit 只认 content，
- * 没有占位符引用的变量会成为「孤儿」，生成报告时永远不出现。
+ * 三个关键约定，和 HTML 页一致：
+ * 1. split.content 原样透传用户输入，不自动拼 `## title` + `{{key}}`。
+ *    后端 _compute_split_display_content() 会按变量 title 生成 display_content，
+ *    远端 /detail 还会再生成一遍；在 content 里自己再拼一份就是标题重复。
+ * 2. 顶层 content 传空串，由后端 _build_template_markdown() 自己算。
+ * 3. key 只有 json 类型用用户填的，其余按位置生成；
+ *    chapter_index 未分组从 1 开始，第 n 个二级分组偏移 n*100。
  */
 function buildPayload(): V2CreateRequest {
   const list: V2TemplateSplit[] = splits.value.map((split, si) => {
     const chapterNo = si + 1
-    const lines: string[] = []
-    const base = split.content.trim()
-    if (base) lines.push(base)
 
-    const variables = split.variables.map((v, vi) => {
-      const key = `key_${chapterNo}_${vi + 1}`
-      const title = v.title.trim()
-      if (title) lines.push(`## ${title}`)
-      lines.push(`{{${key}}}`)
-      return {
-        key,
+    const mapVars = (vars: DraftVariable[], varStart: number) =>
+      vars.map((v, vi) => ({
+        key: v.type === 'json' ? v.key.trim() : `key_${chapterNo}_${varStart + vi + 1}`,
         type: v.type || 'markdown',
         value: v.value,
-        chapter_index: chapterNo * 10000 + (vi + 1),
+        chapter_index: chapterNo * 10000 + varStart + vi + 1,
         prompt: v.prompt,
-        title,
-      }
-    })
+        title: v.title.trim(),
+      }))
+
+    const variables = mapVars(split.variables, 0)
+    const subsections = split.subsections.map((sub, sui) => ({
+      title: sub.title.trim(),
+      order: sui,
+      variable_mapping_list: sub.variables.length
+        ? mapVars(sub.variables, (sui + 1) * 100)
+        : null,
+    }))
 
     return {
-      content: lines.join('\n\n'),
+      content: split.content,
       index: chapterNo * 10000,
       section_title: split.section_title.trim(),
+      serp_prompt: split.serp_prompt.trim() || null,
       variable_mapping_list: variables.length ? variables : null,
+      subsection_list: subsections.length ? subsections : null,
     }
   })
 
@@ -260,18 +372,36 @@ function buildPayload(): V2CreateRequest {
     name: name.value.trim(),
     description: description.value.trim(),
     is_replace: isReplace.value,
-    content: list.map(s => (s.section_title ? `# ${s.section_title}\n\n${s.content}` : s.content)).join('\n\n'),
+    content: '',
     template_split_list: list,
   }
 }
 
+/**
+ * 只保留 HTML 页同款的两条硬校验：模板名必填、json 类型的 value 要能 parse。
+ * 章节标题和变量标题都允许为空：后端 V2VariableMapping.title 默认空串，
+ * 且空 title 才能避开远端按 title 重生成 display_content 带来的标题重复。
+ */
 function validate(): string {
   if (!name.value.trim()) return '请填写模板名称'
   if (!splits.value.length) return '至少添加一个章节'
   for (const [si, split] of splits.value.entries()) {
-    if (!split.section_title.trim()) return `第 ${si + 1} 个章节还没有标题`
-    for (const [vi, v] of split.variables.entries()) {
-      if (!v.title.trim()) return `「${split.section_title.trim()}」第 ${vi + 1} 个变量还没有标题`
+    const label = split.section_title.trim() || `第 ${si + 1} 个章节`
+    const all = [
+      ...split.variables,
+      ...split.subsections.flatMap(sub => sub.variables),
+    ]
+    for (const v of all) {
+      if (v.type === 'json') {
+        if (!v.key.trim()) return `「${label}」有 json 变量没填变量标识`
+        if (v.value.trim()) {
+          try {
+            JSON.parse(v.value)
+          } catch (e: any) {
+            return `「${label}」变量「${v.key.trim()}」的 JSON 格式错误: ${e.message}`
+          }
+        }
+      }
     }
   }
   return ''
@@ -543,6 +673,47 @@ addSplit()
   color: #55607a;
   font-size: 12px;
   font-weight: 600;
+}
+
+.var-head-hint {
+  margin-left: 6px;
+  color: #9aa3b5;
+  font-style: normal;
+  font-weight: 400;
+}
+
+/* ---- 二级标题分组 ---- */
+.sub {
+  margin: 10px 0;
+  padding: 10px;
+  border: 1px dashed #cdd6e5;
+  border-radius: 8px;
+  background: #f7f9fc;
+}
+
+.sub-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 8px;
+}
+
+.sub-title {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid #d8dfeb;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  color: #2b3245;
+}
+
+.sub-title:focus {
+  outline: none;
+  border-color: #4a90e2;
 }
 
 /* ---- 变量 ---- */
