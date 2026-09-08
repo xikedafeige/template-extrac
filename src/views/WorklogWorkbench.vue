@@ -1,8 +1,7 @@
 <template>
   <div class="worklog-page">
     <header class="topbar">
-      <div class="brand"><i />{{ view?.template_name || '工作记录表模板' }}</div>
-      <div class="crumb">工作记录表 · 版式还原与 AI 辅助修改</div>
+      <div class="brand"><i />模板智能维护工作台</div>
       <div class="grow" />
       <span v-if="dirty" class="badge orange">有未保存修改</span>
       <span class="status" :class="statusKind">{{ status }}</span>
@@ -21,8 +20,8 @@
         <div class="pane-head">
           <div class="head-text">
             <h3>模板预览</h3>
-            <small>{{ layoutSubtitle }}</small>
           </div>
+          <span v-if="view?.template_name" class="pane-template-name" :title="view.template_name">{{ view.template_name }}</span>
           <div class="head-actions">
             <button class="btn" :disabled="uploadingLayout" @click="pickLayoutFile">
               {{ uploadingLayout ? '上传中…' : '更新版式源' }}
@@ -35,8 +34,8 @@
               @change="uploadLayout"
             />
             <button class="precision-btn" :class="{ active: preciseMode }" @click="preciseMode = !preciseMode">
-              <span class="precision-icon">◎</span>
-              {{ preciseMode ? '返回 AI 助手' : '精准编辑' }}
+              <span class="precision-icon">✦</span>
+              <span>{{ preciseMode ? '返回 AI 助手' : '精准编辑' }}</span>
             </button>
           </div>
         </div>
@@ -261,7 +260,7 @@ const draftVersion = ref(0)
 
 const loading = ref(false)
 const error = ref('')
-const status = ref('未加载模板')
+const status = ref('')
 const statusKind = ref<'' | 'ok' | 'err'>('')
 
 const activeKey = ref('')
@@ -301,12 +300,6 @@ const unmatchedDbKeys = computed(() => view.value?.unmatched_db_keys ?? [])
 const keyMismatchCount = computed(() => unmatchedLayoutKeys.value.length)
 /** 写法不同但已自动对上的 key */
 const aliasedKeys = computed(() => view.value?.aliased_keys ?? [])
-
-const layoutSubtitle = computed(() => {
-  if (!view.value) return ''
-  if (!layoutHasTable.value) return '按章节顺序展示'
-  return view.value.layout_is_dedicated ? '按原始 Word 版式还原' : '按模板 Word 还原'
-})
 
 const selectionHint = computed(() => {
   if (selectionText.value) return '已选中左侧原文，我只会改这一段'
@@ -692,12 +685,6 @@ onMounted(load)
   margin-right: 8px;
 }
 
-.crumb {
-  color: #7c8494;
-  font-size: 11px;
-  white-space: nowrap;
-}
-
 .grow {
   flex: 1;
 }
@@ -805,6 +792,23 @@ onMounted(load)
   padding: 10px 16px;
   border-bottom: 1px solid #e5e9f0;
   flex: none;
+  position: relative;
+}
+
+/* 模板名绝对居中到整个标题栏：左右两侧宽度不等，flex 只能居中到剩余空间。
+   字体与 .head-text h3（“模板预览”）保持一致。 */
+.pane-template-name {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 700;
+  color: #202532;
+  pointer-events: none;
 }
 
 .head-text h3 {
@@ -835,20 +839,26 @@ onMounted(load)
   padding: 5px 10px;
   font: 600 11px/1.4 inherit;
   cursor: pointer;
+  box-shadow: 0 2px 5px rgba(56, 103, 239, 0.08);
+  transition: all 0.18s ease;
 }
 
 .precision-btn:hover {
   border-color: #8da6fa;
+  background: linear-gradient(135deg, #edf2ff, #e4ebff);
+  box-shadow: 0 4px 10px rgba(56, 103, 239, 0.16);
+  transform: translateY(-1px);
 }
 
 .precision-btn.active {
   border-color: #3867ef;
   background: linear-gradient(135deg, #3867ef, #5d7ff2);
   color: #fff;
+  box-shadow: 0 4px 12px rgba(56, 103, 239, 0.24);
 }
 
 .precision-icon {
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1;
 }
 
@@ -1502,7 +1512,6 @@ onMounted(load)
     padding: 0 12px;
   }
 
-  .crumb,
   .topbar .status {
     display: none;
   }
