@@ -32,6 +32,7 @@
 
     <div class="list-container">
       <div v-if="loading" class="loading-state">加载中...</div>
+      <div v-else-if="listError" class="error-state">{{ listError }}</div>
       <div v-else-if="!items.length" class="empty-state">
         {{ activeKeyword ? `没有找到名称包含「${activeKeyword}」的模板` : '暂无模板数据' }}
       </div>
@@ -48,8 +49,21 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="item in items" :key="item.template_id">
+          <tr
+            v-for="item in items"
+            :key="item.template_id"
+            :class="{ 'is-selected': selectedTemplateId === item.template_id }"
+            @click="selectTemplate(item)"
+          >
             <td class="name-cell" :title="item.template_name || '未命名'">
+              <input
+                class="template-radio"
+                type="radio"
+                name="template-selection"
+                :checked="selectedTemplateId === item.template_id"
+                :aria-label="`选择模板 ${item.template_name || '未命名'}`"
+                @click.stop="selectTemplate(item)"
+              />
               <span v-html="highlight(item.template_name || '未命名')" />
             </td>
             <td>
@@ -68,14 +82,14 @@
             <td>{{ formatTime(item.created_at) }}</td>
             <td>{{ formatTime(item.updated_at) }}</td>
             <td class="action-cell">
-              <button class="btn-link" @click="emit('edit', item.template_id, item.template_type)">编辑</button>
+              <button class="btn-link" @click.stop="emit('edit', item.template_id, item.template_type)">编辑</button>
               <button
                 v-if="isBase(item)"
                 class="btn-link btn-disabled"
                 disabled
                 title="底版模板不允许删除"
               >删除</button>
-              <button v-else class="btn-link btn-danger" @click="askDelete(item)">删除</button>
+              <button v-else class="btn-link btn-danger" @click.stop="askDelete(item)">删除</button>
             </td>
           </tr>
         </tbody>
@@ -181,6 +195,8 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = ref(10)
 const loading = ref(false)
+const listError = ref('')
+const selectedTemplateId = ref('')
 const keyword = ref('')
 // activeKeyword 是已生效的查询词，与输入框分开，避免边打字边触发请求
 const activeKeyword = ref('')
@@ -213,8 +229,9 @@ async function fetchList(options: { silent?: boolean } = {}) {
   // silent 用于删除后的补数据：不置 loading，避免表格闪一下。
   if (!options.silent) loading.value = true
   try {
+    listError.value = ''
     const res = await listTemplates(page.value, pageSize.value, activeKeyword.value)
-    if (res.code === 0) {
+    if (res.code === 0 || res.code === 200 || Array.isArray(res.data?.items)) {
       items.value = res.data.items || []
       total.value = res.data.total || 0
       // 删除或筛选后当前页可能已越界，回退到最后一页
@@ -222,12 +239,28 @@ async function fetchList(options: { silent?: boolean } = {}) {
         page.value = totalPages.value
         await fetchList(options)
       }
+    } else {
+      listError.value = res.message || '模板列表加载失败'
     }
   } catch (err) {
     console.error('获取列表失败:', err)
+    listError.value = err instanceof Error ? err.message : '模板列表加载失败'
   } finally {
     if (!options.silent) loading.value = false
   }
+}
+
+function selectTemplate(item: TemplateListItem) {
+  const id = String(item.template_id || '').trim()
+  if (!id) return
+  selectedTemplateId.value = id
+  window.parent.postMessage(
+    {
+      type: 'template-selected',
+      payload: { id, name: item.template_name || id },
+    },
+    '*',
+  )
 }
 
 function doSearch() {
@@ -333,14 +366,17 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .template-list-page {
+  box-sizing: border-box;
+  height: 100%;
   min-height: 100vh;
-  padding: 40px 28px 48px;
+  padding: 24px 24px 32px;
+  overflow-y: auto;
   background: linear-gradient(180deg, #f8fbff 0%, #f4f7fb 100%);
 }
 
 .page-header {
   max-width: 1200px;
-  margin: 0 auto 20px;
+  margin: 0 auto 16px;
 }
 
 .page-header h1 {
@@ -517,9 +553,9 @@ onBeforeUnmount(() => {
 .list-container {
   max-width: 1200px;
   margin: 0 auto;
-  overflow: hidden;
+  overflow: auto;
   border: 1px solid #e1e8f2;
-  border-radius: 14px;
+  border-radius: 10px;
   background: #ffffff;
   box-shadow: 0 10px 28px rgba(30, 64, 110, .07);
 }
@@ -553,6 +589,28 @@ onBeforeUnmount(() => {
 
 .template-table tr:hover td {
   background: #f8fafc;
+}
+
+.template-table tr.is-selected td {
+  background: #eff6ff;
+}
+
+.template-radio {
+  width: 16px;
+  height: 16px;
+  margin-right: 10px;
+  accent-color: #2563eb;
+  vertical-align: -3px;
+}
+
+.error-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 220px;
+  padding: 24px;
+  color: #b91c1c;
+  font-size: 14px;
 }
 
 .name-cell {
