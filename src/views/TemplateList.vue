@@ -3,7 +3,6 @@
     <div class="page-header">
       <div>
         <h1>模板管理</h1>
-        <p>管理和维护你的模板，支持按名称快速检索</p>
       </div>
     </div>
 
@@ -349,12 +348,6 @@ onBeforeUnmount(() => {
   font-size: 26px;
   font-weight: 750;
   letter-spacing: -0.02em;
-}
-
-.page-header p {
-  margin: 7px 0 0;
-  color: #7b879b;
-  font-size: 13px;
 }
 
 .btn-primary {
