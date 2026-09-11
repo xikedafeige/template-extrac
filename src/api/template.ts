@@ -11,15 +11,16 @@ import type {
   GeneratePromptResponse,
   V2CreateRequest,
 } from '../types/template'
-
-const FIXED_AUTH_HEADERS = {
-  token: 'feb9ff10-508d-4f32-8050-10bfea07b2e1',
-  tenantid: '1',
-}
+import { getAuthHeaders } from './auth'
 
 const api = axios.create({
   baseURL: import.meta.env.PROD ? '/performance-api' : '',
-  headers: FIXED_AUTH_HEADERS,
+  timeout: 20000,
+})
+
+api.interceptors.request.use((config) => {
+  Object.assign(config.headers, getAuthHeaders())
+  return config
 })
 
 export async function uploadTemplate(file: File): Promise<UploadResponse> {

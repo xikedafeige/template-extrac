@@ -243,6 +243,7 @@ import MarkdownIt from 'markdown-it'
 import axios from 'axios'
 import { getWorklogTemplate, previewWorklogTemplate } from '../api/worklog'
 import { applyWorkbenchPatch, askWorkbenchAssistant, getWorkbenchTemplate, saveWorkbenchTemplate } from '../api/workbench'
+import { getAuthHeaders } from '../api/auth'
 import type { WorklogView } from '../types/worklog'
 import type { TemplateDraft, TemplatePatch } from '../types/workbench'
 
@@ -566,8 +567,7 @@ async function uploadLayout(event: Event) {
       form,
       {
         headers: {
-          token: 'feb9ff10-508d-4f32-8050-10bfea07b2e1',
-          tenantid: '1',
+          ...getAuthHeaders(),
         },
       },
     )
@@ -1529,6 +1529,87 @@ onMounted(load)
 
   .topbar .status {
     display: none;
+  }
+}
+/* Workspace alignment overrides: keep preview, variables and assistant panes aligned. */
+.workspace {
+  grid-template-columns: minmax(0, 1fr) 400px;
+  gap: 16px;
+  padding: 16px;
+  align-items: stretch;
+  box-sizing: border-box;
+}
+
+.workspace.precise-mode {
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 1fr);
+}
+
+.pane {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.pane-head {
+  height: 58px;
+  min-height: 58px;
+  padding: 10px 16px;
+  gap: 10px;
+  box-sizing: border-box;
+}
+
+.pane-body {
+  box-sizing: border-box;
+}
+
+.scroll,
+.assistant-pane .chat-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
+}
+
+.assistant-pane .chat-scroll {
+  padding-top: 14px;
+}
+
+@media (max-width: 1050px) {
+  .workspace,
+  .workspace.precise-mode {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    padding: 16px;
+    overflow: auto;
+  }
+
+  .pane {
+    height: 520px;
+  }
+
+  .assistant-pane {
+    height: 650px;
+  }
+}
+
+/* Keep preview and AI assistant side by side at every viewport width. */
+@media (max-width: 1050px) {
+  .workspace {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 400px;
+    min-width: 600px;
+    overflow-x: auto;
+  }
+
+  .workspace.precise-mode {
+    grid-template-columns: minmax(0, 1fr) minmax(360px, 1fr);
+  }
+
+  .pane,
+  .assistant-pane {
+    height: 100%;
   }
 }
 </style>
