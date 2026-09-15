@@ -1041,24 +1041,31 @@ onMounted(load)
   line-height: 1.6;
 }
 
+/* 新增章节：完全嵌入正文流，不加边框和底色。
+   早先用过 border + background 标识“版式源里还没有这一节”，但那个框会一直
+   存在（除非重新上传含新占位符的版式 docx），即使保存后也不消，反而像
+   渲染缺陷。诊断信息已经由 layout_extra_sections 和页面提示表达，不需要
+   在正文里再画一个框。 */
 .layout-host :deep(.wl-extra-section) {
-  margin-bottom: 14px;
-  padding: 11px 13px;
-  border: 1px solid #e5e9f0;
-  border-radius: 7px;
-  background: #fbfcff;
+  display: block;
 }
 
+/* 章节标题：与版式里原有的一级标题保持一致的加粗与行间节奏，
+   去框后靠它来区分章节与正文，不能再依赖容器的 padding。 */
 .layout-host :deep(.wl-extra-section h4) {
-  margin: 0 0 9px;
-  font-size: 14px;
+  margin: 12px 0 6px;
+  font-size: inherit;
   font-weight: 700;
+  color: inherit;
 }
 
+/* 新章节里变量的小标题：去掉外层框后它直接和版式正文并列，
+   再用灰字 11px 会比相邻标题淡一截；与 .wl-extra-heading 保持一致。 */
 .layout-host :deep(.wl-extra-label) {
-  margin: 8px 0 3px;
-  color: #7c8494;
-  font-size: 11px;
+  margin: 5px 0;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
 }
 
 /* 已有章节里新增的变量：嵌在正文流里，不能像新章节那样加整块边框，
