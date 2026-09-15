@@ -12,6 +12,7 @@ import type {
   V2CreateRequest,
 } from '../types/template'
 import { getAuthHeaders } from './auth'
+import { getUrlContext } from './urlContext'
 
 const api = axios.create({
   baseURL: import.meta.env.PROD ? '/performance-api' : '',
@@ -87,11 +88,14 @@ export async function listTemplates(
   pageSize = 20,
   templateName = '',
 ): Promise<ListResponse> {
+  const { type, commissionTaskId } = getUrlContext()
   const { data } = await api.get<ListResponse>('/api/template/list', {
     params: {
       page,
       page_size: pageSize,
       ...(templateName.trim() ? { template_name: templateName.trim() } : {}),
+      ...(type ? { type } : {}),
+      ...(commissionTaskId ? { commission_task_id: commissionTaskId } : {}),
     },
   })
   return data

@@ -9,6 +9,7 @@ import type {
 } from '../types/workbench'
 import { toDraftPayload } from '../types/workbench'
 import { getAuthHeaders } from './auth'
+import { getUrlContext } from './urlContext'
 
 const api = axios.create({
   baseURL: import.meta.env.PROD ? '/performance-api' : '',
@@ -55,12 +56,15 @@ export async function saveWorkbenchTemplate(
   draftVersion: number,
   templateName?: string,
 ): Promise<SaveResponse> {
+  const { type, commissionTaskId } = getUrlContext()
   const { data } = await api.post<SaveResponse>('/api/template/workbench/save', {
     template_id: templateId,
     draft: toDraftPayload(draft),
     draft_version: draftVersion,
     // 每次保存都是派生新模板，名字由用户在弹窗里输入。
     template_name: templateName || '',
+    type,
+    commission_task_id: commissionTaskId,
   })
   return data
 }

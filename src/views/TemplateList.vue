@@ -39,8 +39,8 @@
         <thead>
           <tr>
             <th>模板名称</th>
-            <th>模板类型</th>
-            <th>来源模板</th>
+            <th class="stage-col">委托任务类型</th>
+            <th class="kind-col">模板类型</th>
             <th>描述</th>
             <th>创建时间</th>
             <th>更新时间</th>
@@ -65,17 +65,13 @@
               />
               <span v-html="highlight(item.template_name || '未命名')" />
             </td>
-            <td>
-              <span
-                v-if="typeMeta(item.template_type)"
-                class="type-tag"
-                :class="`type-tag--${typeMeta(item.template_type)!.tone}`"
-                :title="typeMeta(item.template_type)!.hint || ''"
-              >{{ typeMeta(item.template_type)!.label }}</span>
-              <span v-else-if="item.template_type" class="type-tag type-tag--unknown" :title="`未定义的类型：${item.template_type}`">{{ item.template_type }}</span>
+            <td class="stage-col">
+              <span v-if="reviewStageLabel(item.review_stage)" class="meta-tag meta-tag--stage">{{ reviewStageLabel(item.review_stage) }}</span>
+              <span v-else class="meta-empty">-</span>
             </td>
-            <td class="source-cell" :title="item.base_template_name || item.base_template_id || ''">
-              <span v-if="item.base_template_id" class="derived-tag">{{ item.base_template_name || item.base_template_id }}</span>
+            <td class="kind-col">
+              <span v-if="templateKindLabel(item.type)" class="meta-tag meta-tag--kind">{{ templateKindLabel(item.type) }}</span>
+              <span v-else class="meta-empty">-</span>
             </td>
             <td class="desc-cell" :title="item.template_description || ''">{{ item.template_description || '-' }}</td>
             <td>{{ formatTime(item.created_at) }}</td>
@@ -169,7 +165,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { deleteTemplate, listTemplates } from '../api/template'
 import type { TemplateListItem } from '../types/template'
-import { templateTypeMeta as typeMeta } from '../types/templateType'
+import { reviewStageLabel, templateKindLabel } from '../types/listEnums'
 
 const emit = defineEmits<{
   create: []
@@ -614,65 +610,43 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.type-tag {
-  padding: 1px 6px;
-  border-radius: 9px;
-  background: #e8f2ff;
-  color: #1868c0;
-  font-size: 11px;
-  font-weight: 400;
+/* 委托任务类型 / 模板类型两列：定宽，避免标签换行或被挤扁 */
+.stage-col {
+  width: 130px;
+  white-space: nowrap;
 }
 
-/* 每类模板一个色调，列表里一眼能分清。色值全部取低饱和度，
-   与页面整体的淡色调一致，不抢模板名称的注意力。 */
-.type-tag--blue {
+.kind-col {
+  width: 150px;
+  white-space: nowrap;
+}
+
+/* 两列的标签：胶囊样式，字号和内边距比原来更饱满，回显更清晰 */
+.meta-tag {
+  display: inline-block;
+  padding: 3px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+/* 委托任务类型：蓝色系 */
+.meta-tag--stage {
   background: #e8f2ff;
   color: #1868c0;
 }
 
-.type-tag--green {
+/* 模板类型：绿色系，与委托任务类型区分开 */
+.meta-tag--kind {
   background: #e6f6ed;
   color: #1a7f45;
 }
 
-.type-tag--amber {
-  background: #fdf1de;
-  color: #96601a;
-}
-
-.type-tag--violet {
-  background: #f0ebfd;
-  color: #5b3ec0;
-}
-
-/* 数据库里出现了未定义的 code：用中性灰并直接回显原值，
-   方便发现脏数据，而不是默默不显示。 */
-.type-tag--unknown {
-  background: #f0f1f3;
-  color: #6b7280;
-}
-
-/* 派生标识用中性灰，不和蓝色的类型标签抢注意力 */
-.derived-tag {
-  padding: 1px 6px;
-  border-radius: 9px;
-  background: #f0f2f6;
-  color: #626b7a;
-  font-size: 11px;
-  font-weight: 400;
-  max-width: 180px;
-  display: inline-block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  vertical-align: bottom;
-}
-
-.source-cell {
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* 无值时的占位，弱化显示 */
+.meta-empty {
+  color: #b6bcc7;
 }
 
 .name-cell :deep(mark) {

@@ -114,6 +114,10 @@ export interface TemplateListItem {
   base_template_id?: string
   /** 底版名称，用于展示“派生自 XX” */
   base_template_name?: string
+  /** 委托任务类型：post 事后 / mid 事中 / pre 事前 / goal 绩效目标 */
+  review_stage?: string
+  /** 模板类型：1 报告 / 2 工作记录表 / 3 质控智能采集表 */
+  type?: number | string
   created_at?: string
   updated_at?: string
 }
