@@ -38,9 +38,14 @@ export async function uploadTemplate(file: File): Promise<UploadResponse> {
 export async function createTemplateV2(
   payload: V2CreateRequest,
 ): Promise<SubmitResponse> {
+  const { type, commissionTaskId } = getUrlContext()
   const { data } = await api.post<SubmitResponse>(
     '/api/template/v2/create',
-    payload,
+    {
+      ...payload,
+      type,
+      commission_task_id: commissionTaskId,
+    },
   )
   return data
 }
@@ -54,8 +59,11 @@ export async function createTemplateV2(
 export async function uploadTemplateToWorkbench(
   file: File,
 ): Promise<SubmitResponse> {
+  const { type, commissionTaskId } = getUrlContext()
   const formData = new FormData()
   formData.append('file', file)
+  formData.append('type', type)
+  formData.append('commission_task_id', commissionTaskId)
   const { data } = await api.post<SubmitResponse>(
     '/api/template/upload-to-workbench',
     formData,
