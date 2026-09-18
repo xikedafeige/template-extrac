@@ -54,13 +54,7 @@
             :class="{ 'is-selected': selectedTemplateId === item.template_id }"
             @click="selectTemplate(item)"
           >
-            <td
-              class="name-cell"
-              @mouseenter="showNameTooltip($event, item.template_name || '未命名')"
-              @mouseleave="hideNameTooltip"
-              @focusin="showNameTooltip($event, item.template_name || '未命名')"
-              @focusout="hideNameTooltip"
-            >
+            <td class="name-cell">
               <input
                 class="template-radio"
                 type="radio"
@@ -69,7 +63,15 @@
                 :aria-label="`选择模板 ${item.template_name || '未命名'}`"
                 @click.stop="selectTemplate(item)"
               />
-              <span v-html="highlight(item.template_name || '未命名')" />
+              <span
+                class="name-text"
+                tabindex="0"
+                @mouseenter="showNameTooltip($event, item.template_name || '未命名')"
+                @mouseleave="hideNameTooltip"
+                @focus="showNameTooltip($event, item.template_name || '未命名')"
+                @blur="hideNameTooltip"
+                v-html="highlight(item.template_name || '未命名')"
+              />
             </td>
             <td class="stage-col">
               <span v-if="reviewStageLabel(item.review_stage)" class="meta-tag meta-tag--stage">{{ reviewStageLabel(item.review_stage) }}</span>
@@ -220,21 +222,12 @@ function showNameTooltip(event: Event, text: string) {
   const cell = event.currentTarget as HTMLElement | null
   if (!cell || !text) return
   const rect = cell.getBoundingClientRect()
-  const showAbove = rect.bottom + 64 > window.innerHeight
-  const tooltipWidth = Math.min(360, window.innerWidth - 32)
-  const halfWidth = tooltipWidth / 2
-  const center = Math.min(
-    Math.max(rect.left + rect.width / 2, halfWidth + 16),
-    window.innerWidth - halfWidth - 16,
-  )
   nameTooltip.value = {
     visible: true,
     text,
     style: {
-      left: `${center}px`,
-      ...(showAbove
-        ? { bottom: `${window.innerHeight - rect.top + 8}px` }
-        : { top: `${rect.bottom + 8}px` }),
+      left: `${rect.left + rect.width / 2}px`,
+      bottom: `${window.innerHeight - rect.top + 3}px`,
     },
   }
 }
@@ -658,6 +651,16 @@ onBeforeUnmount(() => {
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.name-text {
+  display: inline-block;
+  max-width: calc(100% - 30px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+  outline: none;
 }
 
 .name-tooltip {
