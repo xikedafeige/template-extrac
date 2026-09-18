@@ -21,7 +21,7 @@
           <div class="head-text">
             <h3>模板预览</h3>
           </div>
-          <span v-if="view?.template_name" class="pane-template-name" :title="view.template_name">{{ view.template_name }}</span>
+          <span v-if="view?.template_name" class="pane-template-name" :data-tooltip="view.template_name" :aria-label="view.template_name" tabindex="0"><span class="pane-template-name-text">{{ view.template_name }}</span></span>
           <div class="head-actions">
             <button class="btn" :disabled="uploadingLayout" @click="pickLayoutFile">
               {{ uploadingLayout ? '上传中…' : '更新版式源' }}
@@ -816,7 +816,51 @@ onMounted(load)
   font-size: 14px;
   font-weight: 700;
   color: #202532;
+  z-index: 10;
+  overflow: visible;
+  pointer-events: auto;
+  outline: none;
+}
+
+.pane-template-name-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-template-name::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 9px);
+  left: 50%;
+  width: max-content;
+  max-width: min(360px, 70vw);
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: #202532;
+  color: #fff;
+  box-shadow: 0 6px 18px rgba(31, 41, 55, .2);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  text-align: left;
+  white-space: normal;
+  word-break: break-word;
+  opacity: 0;
+  visibility: hidden;
   pointer-events: none;
+  transform: translate(-50%, -3px);
+  transition: opacity .08s ease, transform .08s ease, visibility 0s linear .08s;
+}
+
+.pane-template-name:hover::after,
+.pane-template-name:focus-visible::after {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0);
+  transition-delay: 0s;
 }
 
 .head-text h3 {

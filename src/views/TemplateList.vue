@@ -1,5 +1,5 @@
 <template>
-  <div class="template-list-page">
+  <div class="template-list-page" @scroll.capture="hideNameTooltip">
     <div class="page-header">
       <div>
         <h1>模板管理</h1>
@@ -54,7 +54,13 @@
             :class="{ 'is-selected': selectedTemplateId === item.template_id }"
             @click="selectTemplate(item)"
           >
-            <td class="name-cell" :title="item.template_name || '未命名'">
+            <td
+              class="name-cell"
+              @mouseenter="showNameTooltip($event, item.template_name || '未命名')"
+              @mouseleave="hideNameTooltip"
+              @focusin="showNameTooltip($event, item.template_name || '未命名')"
+              @focusout="hideNameTooltip"
+            >
               <input
                 class="template-radio"
                 type="radio"
@@ -158,6 +164,17 @@
         </div>
       </div>
     </div>
+
+    <Teleport to="body">
+      <div
+        v-if="nameTooltip.visible"
+        class="name-tooltip"
+        role="tooltip"
+        :style="nameTooltip.style"
+      >
+        {{ nameTooltip.text }}
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -193,6 +210,38 @@ const loading = ref(false)
 const listError = ref('')
 const selectedTemplateId = ref('')
 const keyword = ref('')
+const nameTooltip = ref({
+  visible: false,
+  text: '',
+  style: {} as Record<string, string>,
+})
+
+function showNameTooltip(event: Event, text: string) {
+  const cell = event.currentTarget as HTMLElement | null
+  if (!cell || !text) return
+  const rect = cell.getBoundingClientRect()
+  const showAbove = rect.bottom + 64 > window.innerHeight
+  const tooltipWidth = Math.min(360, window.innerWidth - 32)
+  const halfWidth = tooltipWidth / 2
+  const center = Math.min(
+    Math.max(rect.left + rect.width / 2, halfWidth + 16),
+    window.innerWidth - halfWidth - 16,
+  )
+  nameTooltip.value = {
+    visible: true,
+    text,
+    style: {
+      left: `${center}px`,
+      ...(showAbove
+        ? { bottom: `${window.innerHeight - rect.top + 8}px` }
+        : { top: `${rect.bottom + 8}px` }),
+    },
+  }
+}
+
+function hideNameTooltip() {
+  nameTooltip.value.visible = false
+}
 // activeKeyword 是已生效的查询词，与输入框分开，避免边打字边触发请求
 const activeKeyword = ref('')
 const totalPages = computed(() => Math.max(Math.ceil(total.value / pageSize.value), 1))
@@ -353,6 +402,7 @@ watch(pending, value => {
 
 onMounted(() => window.addEventListener('keydown', onKeydown))
 onBeforeUnmount(() => {
+  hideNameTooltip()
   window.removeEventListener('keydown', onKeydown)
   if (toastTimer) clearTimeout(toastTimer)
   document.body.style.overflow = ''
@@ -608,6 +658,26 @@ onBeforeUnmount(() => {
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.name-tooltip {
+  position: fixed;
+  z-index: 3000;
+  width: max-content;
+  max-width: min(360px, calc(100vw - 32px));
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: #202532;
+  color: #fff;
+  box-shadow: 0 6px 18px rgba(31, 41, 55, .2);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  text-align: left;
+  white-space: normal;
+  word-break: break-word;
+  pointer-events: none;
+  transform: translateX(-50%);
 }
 
 /* 委托任务类型 / 模板类型两列：定宽，避免标签换行或被挤扁 */

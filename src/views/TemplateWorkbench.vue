@@ -10,7 +10,7 @@
 
     <main class="workspace" :class="{ 'precise-mode': preciseMode }">
       <section class="pane">
-        <div class="pane-head"><h2>模板预览</h2><span v-if="draft?.name" class="pane-template-name" :title="draft.name">{{ draft.name }}</span><div class="grow" /><button class="precision-btn" :class="{ active: preciseMode }" @click="togglePreciseMode"><span class="precision-icon">✦</span><span>{{ preciseMode ? '返回 AI 助手' : '精准编辑' }}</span></button><button v-if="editMode" class="mini-btn" @click="openSectionForm()">＋新增章节</button></div>
+        <div class="pane-head"><h2>模板预览</h2><span v-if="draft?.name" class="pane-template-name" :data-tooltip="draft.name" :aria-label="draft.name" tabindex="0"><span class="pane-template-name-text">{{ draft.name }}</span></span><div class="grow" /><button class="precision-btn" :class="{ active: preciseMode }" @click="togglePreciseMode"><span class="precision-icon">✦</span><span>{{ preciseMode ? '返回 AI 助手' : '精准编辑' }}</span></button><button v-if="editMode" class="mini-btn" @click="openSectionForm()">＋新增章节</button></div>
         <div class="scroll template-scroll" @mouseup="captureSelection" @keyup="captureSelection">
           <div v-if="loading" class="empty">读取模板中…</div>
           <div v-else-if="loadError" class="empty error">{{ loadError }}</div>
@@ -451,6 +451,54 @@ onMounted(load)
 
 .assistant-pane .chat-scroll {
   padding-top: 14px;
+}
+
+.pane-template-name {
+  z-index: 10;
+  overflow: visible;
+  pointer-events: auto;
+  outline: none;
+}
+
+.pane-template-name-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-template-name::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 9px);
+  left: 50%;
+  width: max-content;
+  max-width: min(360px, 70vw);
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: #202532;
+  color: #fff;
+  box-shadow: 0 6px 18px rgba(31, 41, 55, .2);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  text-align: left;
+  white-space: normal;
+  word-break: break-word;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translate(-50%, -3px);
+  transition: opacity .08s ease, transform .08s ease, visibility 0s linear .08s;
+}
+
+.pane-template-name:hover::after,
+.pane-template-name:focus-visible::after {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0);
+  transition-delay: 0s;
 }
 
 @media (max-width: 1050px) {
