@@ -80,15 +80,18 @@ function openCreate() {
   view.value = 'create'
 }
 
-// 上传解析完成并落库后直接进工作台。旧的左右分栏页（TemplateEditor +
+// 上传解析完成并落库后直接进编辑页。旧的左右分栏页（TemplateEditor +
 // MappingTable）不再路由过去；组件暂时保留，确认新流程稳了再清。
-function onUploadCreated(templateId: string) {
+//
+// 跳哪个页面由后端回的 template_type 决定（工作记录表 → worklog，
+// 其余 → workbench），不再硬编码；类型到页面的映射统一在 templateType.ts。
+function onUploadCreated(templateId: string, templateType?: string) {
   if (!templateId) {
     backToList()
     return
   }
   workbenchTemplateId.value = templateId
-  view.value = 'workbench'
+  view.value = templateEditorFor(templateType)
 }
 
 function openManualCreate() {

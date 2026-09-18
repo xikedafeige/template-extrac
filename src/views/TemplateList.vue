@@ -1,5 +1,5 @@
 <template>
-  <div class="template-list-page" @scroll.capture="hideNameTooltip">
+  <div class="template-list-page">
     <div class="page-header">
       <div>
         <h1>模板管理</h1>
@@ -54,7 +54,7 @@
             :class="{ 'is-selected': selectedTemplateId === item.template_id }"
             @click="selectTemplate(item)"
           >
-            <td class="name-cell">
+            <td class="name-cell" :title="item.template_name || '未命名'">
               <input
                 class="template-radio"
                 type="radio"
@@ -63,15 +63,7 @@
                 :aria-label="`选择模板 ${item.template_name || '未命名'}`"
                 @click.stop="selectTemplate(item)"
               />
-              <span
-                class="name-text"
-                tabindex="0"
-                @mouseenter="showNameTooltip($event, item.template_name || '未命名')"
-                @mouseleave="hideNameTooltip"
-                @focus="showNameTooltip($event, item.template_name || '未命名')"
-                @blur="hideNameTooltip"
-                v-html="highlight(item.template_name || '未命名')"
-              />
+              <span v-html="highlight(item.template_name || '未命名')" />
             </td>
             <td class="stage-col">
               <span v-if="reviewStageLabel(item.review_stage)" class="meta-tag meta-tag--stage">{{ reviewStageLabel(item.review_stage) }}</span>
@@ -87,10 +79,10 @@
             <td class="action-cell">
               <button class="btn-link" @click.stop="emit('edit', item.template_id, item.template_type)">编辑</button>
               <button
-                v-if="isBase(item)"
+                v-if="!canDelete(item)"
                 class="btn-link btn-disabled"
                 disabled
-                title="底版模板不允许删除"
+                title="只能删除自己上传的模板；公共底稿不允许删除"
               >删除</button>
               <button v-else class="btn-link btn-danger" @click.stop="askDelete(item)">删除</button>
             </td>
@@ -166,17 +158,6 @@
         </div>
       </div>
     </div>
-
-    <Teleport to="body">
-      <div
-        v-if="nameTooltip.visible"
-        class="name-tooltip"
-        role="tooltip"
-        :style="nameTooltip.style"
-      >
-        {{ nameTooltip.text }}
-      </div>
-    </Teleport>
   </div>
 </template>
 
@@ -212,29 +193,6 @@ const loading = ref(false)
 const listError = ref('')
 const selectedTemplateId = ref('')
 const keyword = ref('')
-const nameTooltip = ref({
-  visible: false,
-  text: '',
-  style: {} as Record<string, string>,
-})
-
-function showNameTooltip(event: Event, text: string) {
-  const cell = event.currentTarget as HTMLElement | null
-  if (!cell || !text) return
-  const rect = cell.getBoundingClientRect()
-  nameTooltip.value = {
-    visible: true,
-    text,
-    style: {
-      left: `${rect.left + rect.width / 2}px`,
-      bottom: `${window.innerHeight - rect.top + 3}px`,
-    },
-  }
-}
-
-function hideNameTooltip() {
-  nameTooltip.value.visible = false
-}
 // activeKeyword 是已生效的查询词，与输入框分开，避免边打字边触发请求
 const activeKeyword = ref('')
 const totalPages = computed(() => Math.max(Math.ceil(total.value / pageSize.value), 1))
@@ -319,9 +277,11 @@ function changePage(nextPage: number) {
   fetchList()
 }
 
-/** 底版：没有 base_template_id 就是底版，不允许删除 */
-function isBase(item: TemplateListItem) {
-  return !String(item.base_template_id || '').trim()
+/** 能否删除：后端算好的 can_delete 为准（owner 本人或白名单）。
+ * 旧版看 base_template_id 是错的：上传链路不写该字段，会把用户
+ * 刚上传的模板一并当成底稿置灰。老接口没返回时默认不可删。 */
+function canDelete(item: TemplateListItem) {
+  return item.can_delete === true
 }
 
 const pending = ref<TemplateListItem | null>(null)
@@ -336,7 +296,7 @@ function showToast(text: string, kind: 'ok' | 'err' = 'ok') {
 }
 
 function askDelete(item: TemplateListItem) {
-  if (isBase(item)) return
+  if (!canDelete(item)) return
   pending.value = item
 }
 
@@ -395,7 +355,6 @@ watch(pending, value => {
 
 onMounted(() => window.addEventListener('keydown', onKeydown))
 onBeforeUnmount(() => {
-  hideNameTooltip()
   window.removeEventListener('keydown', onKeydown)
   if (toastTimer) clearTimeout(toastTimer)
   document.body.style.overflow = ''
@@ -651,36 +610,6 @@ onBeforeUnmount(() => {
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.name-text {
-  display: inline-block;
-  max-width: calc(100% - 30px);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  vertical-align: bottom;
-  white-space: nowrap;
-  outline: none;
-}
-
-.name-tooltip {
-  position: fixed;
-  z-index: 3000;
-  width: max-content;
-  max-width: min(360px, calc(100vw - 32px));
-  padding: 7px 10px;
-  border-radius: 6px;
-  background: #202532;
-  color: #fff;
-  box-shadow: 0 6px 18px rgba(31, 41, 55, .2);
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 1.5;
-  text-align: left;
-  white-space: normal;
-  word-break: break-word;
-  pointer-events: none;
-  transform: translateX(-50%);
 }
 
 /* 委托任务类型 / 模板类型两列：定宽，避免标签换行或被挤扁 */

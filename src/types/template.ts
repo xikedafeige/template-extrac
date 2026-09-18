@@ -96,6 +96,8 @@ export interface SubmitResponse {
   success: boolean
   template_id: string
   template_word_url: string
+  /** 模板类型；上传后靠它决定跳工作记录表还是通用工作台。缺省空 = 通用 */
+  template_type?: string
 }
 
 export interface TemplateListItem {
@@ -114,6 +116,8 @@ export interface TemplateListItem {
   base_template_id?: string
   /** 底版名称，用于展示“派生自 XX” */
   base_template_name?: string
+  /** 能否删除，由后端按 owner/白名单算好，前端不自己判归属 */
+  can_delete?: boolean
   /** 委托任务类型：post 事后 / mid 事中 / pre 事前 / goal 绩效目标 */
   review_stage?: string
   /** 模板类型：1 报告 / 2 工作记录表 / 3 质控智能采集表 */

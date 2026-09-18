@@ -16,6 +16,7 @@
           <div class="picker-icon">↑</div>
           <div class="picker-title">选择或拖入 .docx 文件</div>
           <div class="picker-hint">解析完成后会自动建好模板并进入工作台</div>
+
           <button class="btn-primary" @click="openPicker">选择文件</button>
           <input ref="fileInput" type="file" accept=".docx" hidden @change="onPick" />
         </div>
@@ -56,7 +57,7 @@ import { uploadTemplateToWorkbench } from '../api/template'
 
 const emit = defineEmits<{
   back: []
-  created: [templateId: string]
+  created: [templateId: string, templateType: string]
 }>()
 
 const steps = ['上传文档', '解析正文与待填项、创建模板', '打开工作台']
@@ -122,7 +123,9 @@ async function run(file: File) {
     if (!created.success || !created.template_id) throw new Error('创建模板失败')
 
     stepIndex.value = 2
-    emit('created', created.template_id)
+    // 类型以后端落库结果为准：后端靠 URL 上的 type 分流，工作记录表会回
+    // template_type=WORK_LOG，其余类型不回（空字串即走通用工作台）。
+    emit('created', created.template_id, created.template_type || '')
   } catch (err: any) {
     failed.value = err.response?.data?.error || err.response?.data?.message || err.message || '处理失败'
   } finally {

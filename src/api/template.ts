@@ -62,6 +62,7 @@ export async function uploadTemplateToWorkbench(
   const { type, commissionTaskId } = getUrlContext()
   const formData = new FormData()
   formData.append('file', file)
+  // 后端靠 type 分流：1 通用 / 2 工作记录表 / 3 质控采集表（1 和 3 同一条解析）。
   formData.append('type', type)
   formData.append('commission_task_id', commissionTaskId)
   const { data } = await api.post<SubmitResponse>(
