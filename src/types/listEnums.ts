@@ -29,3 +29,12 @@ export function templateKindLabel(v?: number | string | null): string {
   const key = String(v ?? '').trim()
   return TEMPLATE_KIND_MAP[key] ?? key
 }
+
+/**
+ * 上传页的类型候选项。
+ *
+ * 仅在 URL 没带 type 时用于让用户手选，顺序即展示顺序。
+ * 复用同一张映射表，避免两处维护出现偏差。
+ */
+export const TEMPLATE_KIND_OPTIONS: { value: string; label: string }[] =
+  Object.entries(TEMPLATE_KIND_MAP).map(([value, label]) => ({ value, label }))

@@ -11,15 +11,76 @@
 
     <div class="body">
       <div class="panel">
-        <!-- 选择文件 -->
-        <div v-if="!busy && !failed" class="picker" @dragover.prevent @drop.prevent="onDrop">
-          <div class="picker-icon">↑</div>
-          <div class="picker-title">选择或拖入 .docx 文件</div>
-          <div class="picker-hint">解析完成后会自动建好模板并进入工作台</div>
+        <!-- 空闲态：选类型 + 选文件。两块必须包在同一个 v-if 里，
+             否则下面的 busy / failed 分支会接错条件 -->
+        <template v-if="!busy && !failed">
+          <!-- 类型选择：仅 URL 没带 type 时出现；带了就以 URL 为准，不让用户改 -->
+          <section v-if="needKindPick" class="field">
+            <div class="field-head">
+              <span class="field-no">1</span>
+              <div class="field-text">
+                <div class="field-title">选择模板类型</div>
+                <div class="field-desc">决定解析方式与编辑页形式，选错需重新上传</div>
+              </div>
+            </div>
+            <div class="kind-opts">
+              <label
+                v-for="opt in kindOptions"
+                :key="opt.value"
+                class="kind-opt"
+                :class="{ 'is-active': pickedKind === opt.value }"
+              >
+                <input
+                  v-model="pickedKind"
+                  type="radio"
+                  name="template-kind"
+                  :value="opt.value"
+                  class="sr-only"
+                />
+                <span class="kind-tick" aria-hidden="true" />
+                <span class="kind-name">{{ opt.label }}</span>
+              </label>
+            </div>
+          </section>
 
-          <button class="btn-primary" @click="openPicker">选择文件</button>
-          <input ref="fileInput" type="file" accept=".docx" hidden @change="onPick" />
-        </div>
+          <!-- 选择文件 -->
+          <section class="field">
+            <div v-if="needKindPick" class="field-head">
+              <span class="field-no">2</span>
+              <div class="field-text">
+                <div class="field-title">上传 Word 文档</div>
+                <div class="field-desc">解析完成后自动建好模板并进入工作台</div>
+              </div>
+            </div>
+
+            <div
+              class="picker"
+              :class="{ 'is-over': dragOver }"
+              role="button"
+              tabindex="0"
+              @click="openPicker"
+              @keydown.enter.prevent="openPicker"
+              @keydown.space.prevent="openPicker"
+              @dragover.prevent="dragOver = true"
+              @dragenter.prevent="dragOver = true"
+              @dragleave="dragOver = false"
+              @drop.prevent="onDrop"
+            >
+              <div class="picker-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                  stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 16V4" />
+                  <path d="M7.5 8.5 12 4l4.5 4.5" />
+                  <path d="M4 15v2.5A2.5 2.5 0 0 0 6.5 20h11a2.5 2.5 0 0 0 2.5-2.5V15" />
+                </svg>
+              </div>
+              <div class="picker-title">点击选择，或拖入文件</div>
+              <div class="picker-hint">仅支持 .docx 格式</div>
+              <span class="picker-btn">选择文件</span>
+              <input ref="fileInput" type="file" accept=".docx" hidden @change="onPick" />
+            </div>
+          </section>
+        </template>
 
         <!-- 进度 -->
         <div v-else-if="busy" class="progress">
@@ -54,6 +115,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { uploadTemplateToWorkbench } from '../api/template'
+import { getUrlContext } from '../api/urlContext'
+import { TEMPLATE_KIND_OPTIONS } from '../types/listEnums'
 
 const emit = defineEmits<{
   back: []
@@ -67,7 +130,15 @@ const failed = ref('')
 const fileName = ref('')
 const toast = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
+const dragOver = ref(false)
 let toastTimer: ReturnType<typeof setTimeout> | undefined
+
+// URL 带了 type 就按外部系统的分流走，不展示选择框；没带（比如直接打开
+// 页面）才让用户选，选中值作为 fallback 传给后端。只在初始化时读一次：
+// 上传页停留期间 URL 不会变。
+const needKindPick = !getUrlContext().type
+const kindOptions = TEMPLATE_KIND_OPTIONS
+const pickedKind = ref(kindOptions[0]?.value || '')
 
 function stepClass(i: number) {
   if (i < stepIndex.value) return 'done'
@@ -99,6 +170,7 @@ function onPick(event: Event) {
 }
 
 function onDrop(event: DragEvent) {
+  dragOver.value = false
   const file = event.dataTransfer?.files?.[0]
   if (file) void run(file)
 }
@@ -119,7 +191,10 @@ async function run(file: File) {
     // 后端一次把「解析 → 建模板 → 生成 Word」做完，直接回 template_id。
     // 不在前端重拼 sections 再调 submit：占位符按章节归位的规则在后端，
     // 前端再拼一份很容易和后端走叉。
-    const created = await uploadTemplateToWorkbench(file)
+    const created = await uploadTemplateToWorkbench(
+      file,
+      needKindPick ? pickedKind.value : '',
+    )
     if (!created.success || !created.template_id) throw new Error('创建模板失败')
 
     stepIndex.value = 2
@@ -227,50 +302,206 @@ async function run(file: File) {
 
 .panel {
   width: 100%;
-  max-width: 520px;
-  padding: 34px 30px;
-  border: 1px solid #e6eaf2;
-  border-radius: 14px;
+  max-width: 560px;
+  padding: 30px 32px 32px;
+  border: 1px solid #e8edf6;
+  border-radius: 16px;
   background: #ffffff;
-  box-shadow: 0 2px 10px rgba(15, 23, 42, .04);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .04), 0 12px 32px -12px rgba(15, 23, 42, .12);
 }
+
+/* 只读屏幕阅读器可见：单选框视觉上自绘，但要保留原生键盘与焦点语义 */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ---- 分步小节 ---- */
+.field + .field { margin-top: 26px; }
+
+.field-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.field-no {
+  flex: 0 0 20px;
+  height: 20px;
+  margin-top: 1px;
+  border-radius: 50%;
+  background: #eff5ff;
+  color: #1d4ed8;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 20px;
+}
+
+.field-text { min-width: 0; }
+
+.field-title {
+  color: #111827;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.field-desc {
+  margin-top: 3px;
+  color: #8b93a3;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* ---- 类型选择 ---- */
+.kind-opts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.kind-opt {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 13px 14px;
+  border: 1px solid #e1e8f3;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #44546b;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1.3;
+  transition: border-color .16s ease, background .16s ease, color .16s ease, box-shadow .16s ease;
+}
+
+.kind-opt:hover { border-color: #b9ccea; background: #fbfdff; }
+
+.kind-opt.is-active {
+  border-color: #2563eb;
+  background: #f5f9ff;
+  color: #1d4ed8;
+  font-weight: 600;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, .09);
+}
+
+/* 自绘圆点：原生 radio 各平台尺寸不一致 */
+.kind-tick {
+  position: relative;
+  flex: 0 0 15px;
+  height: 15px;
+  border: 1.5px solid #c6d2e4;
+  border-radius: 50%;
+  background: #ffffff;
+  transition: border-color .16s ease;
+}
+
+.kind-opt.is-active .kind-tick { border-color: #2563eb; }
+
+.kind-opt.is-active .kind-tick::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #2563eb;
+  transform: translate(-50%, -50%);
+}
+
+/* 键盘聚焦环：原生 radio 被视觉隐藏后要把焦点表现补到卡片上 */
+.kind-opt:focus-within {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, .18);
+}
+
+.kind-name { min-width: 0; }
 
 /* ---- 选择文件 ---- */
 .picker {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 9px;
-  padding: 26px 0;
-  border: 1.5px dashed #cfdaea;
+  gap: 7px;
+  padding: 30px 20px 26px;
+  border: 1.5px dashed #d2ddee;
   border-radius: 12px;
-  transition: border-color .18s ease, background .18s ease;
+  background: #fcfdff;
+  cursor: pointer;
+  text-align: center;
+  transition: border-color .18s ease, background .18s ease, box-shadow .18s ease;
 }
 
-.picker:hover { border-color: #2563eb; background: #f9fbff; }
+.picker:hover,
+.picker:focus-visible {
+  border-color: #2563eb;
+  background: #f5f9ff;
+  outline: none;
+}
+
+.picker:focus-visible { box-shadow: 0 0 0 3px rgba(37, 99, 235, .18); }
+
+/* 拖拽悬停：比 hover 更强的反馈，让落点区域明确 */
+.picker.is-over {
+  border-color: #2563eb;
+  border-style: solid;
+  background: #eef5ff;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, .12);
+}
 
 .picker-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  margin-bottom: 3px;
+  border-radius: 13px;
   background: #eff5ff;
-  color: #1d4ed8;
-  text-align: center;
-  font-size: 20px;
-  line-height: 44px;
+  color: #2563eb;
+  transition: transform .18s ease;
 }
+
+.picker-icon svg { width: 23px; height: 23px; }
+
+.picker:hover .picker-icon,
+.picker.is-over .picker-icon { transform: translateY(-2px); }
 
 .picker-title {
   color: #1f2937;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
 }
 
 .picker-hint {
-  margin-bottom: 6px;
-  color: #8b93a3;
+  margin-bottom: 11px;
+  color: #98a1b3;
   font-size: 12px;
 }
+
+/* 看着像按钮，实际是 span：整张卡片已经是触发区，
+   嵌真按钮会产生嵌套点击目标 */
+.picker-btn {
+  padding: 8px 18px;
+  border-radius: 8px;
+  background: #2563eb;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background .16s ease;
+}
+
+.picker:hover .picker-btn { background: #1d4ed8; }
 
 /* ---- 进度 ---- */
 .progress {

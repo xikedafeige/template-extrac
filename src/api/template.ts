@@ -55,15 +55,19 @@ export async function createTemplateV2(
  *
  * 后端把原来 /upload + /submit 两步合成一个接口；/upload 本身保留不动。
  * 解析要逐章调大模型，超时放到 5 分钟。
+ *
+ * fallbackType：仅在 URL 没带 type 时生效（上传页让用户手选的值）。
+ * URL 带了就以 URL 为准，保证外部系统跳转时的分流不被覆盖。
  */
 export async function uploadTemplateToWorkbench(
   file: File,
+  fallbackType = '',
 ): Promise<SubmitResponse> {
   const { type, commissionTaskId } = getUrlContext()
   const formData = new FormData()
   formData.append('file', file)
   // 后端靠 type 分流：1 通用 / 2 工作记录表 / 3 质控采集表（1 和 3 同一条解析）。
-  formData.append('type', type)
+  formData.append('type', type || fallbackType)
   formData.append('commission_task_id', commissionTaskId)
   const { data } = await api.post<SubmitResponse>(
     '/api/template/upload-to-workbench',
