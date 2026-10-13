@@ -58,10 +58,14 @@ export async function createTemplateV2(
  *
  * fallbackType：仅在 URL 没带 type 时生效（上传页让用户手选的值）。
  * URL 带了就以 URL 为准，保证外部系统跳转时的分流不被覆盖。
+ *
+ * fallbackReviewStage：上传页手选的预算绩效类型（pre/mid/post/goal）。
+ * 后端优先用 commission_task_id 查达梦推导，推不出来时才用这个值。
  */
 export async function uploadTemplateToWorkbench(
   file: File,
   fallbackType = '',
+  fallbackReviewStage = '',
 ): Promise<SubmitResponse> {
   const { type, commissionTaskId } = getUrlContext()
   const formData = new FormData()
@@ -69,6 +73,9 @@ export async function uploadTemplateToWorkbench(
   // 后端靠 type 分流：1 通用 / 2 工作记录表 / 3 质控采集表（1 和 3 同一条解析）。
   formData.append('type', type || fallbackType)
   formData.append('commission_task_id', commissionTaskId)
+  if (fallbackReviewStage) {
+    formData.append('review_stage', fallbackReviewStage)
+  }
   const { data } = await api.post<SubmitResponse>(
     '/api/template/upload-to-workbench',
     formData,

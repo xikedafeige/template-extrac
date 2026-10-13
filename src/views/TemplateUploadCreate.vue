@@ -43,10 +43,41 @@
             </div>
           </section>
 
+          <!-- 预算绩效类型：与类型选择同条件出现。后端只在 type=1 且带
+               commission_task_id 时能从达梦推出阶段，直接打开页面时推不出来，
+               正好由用户手选补上 -->
+          <section v-if="needKindPick" class="field">
+            <div class="field-head">
+              <span class="field-no">2</span>
+              <div class="field-text">
+                <div class="field-title">选择预算绩效类型</div>
+                <div class="field-desc">对应模板的评审阶段，入库后可在列表页查看</div>
+              </div>
+            </div>
+            <div class="kind-opts kind-opts--stage">
+              <label
+                v-for="opt in stageOptions"
+                :key="opt.value"
+                class="kind-opt"
+                :class="{ 'is-active': pickedStage === opt.value }"
+              >
+                <input
+                  v-model="pickedStage"
+                  type="radio"
+                  name="review-stage"
+                  :value="opt.value"
+                  class="sr-only"
+                />
+                <span class="kind-tick" aria-hidden="true" />
+                <span class="kind-name">{{ opt.label }}</span>
+              </label>
+            </div>
+          </section>
+
           <!-- 选择文件 -->
           <section class="field">
             <div v-if="needKindPick" class="field-head">
-              <span class="field-no">2</span>
+              <span class="field-no">3</span>
               <div class="field-text">
                 <div class="field-title">上传 Word 文档</div>
                 <div class="field-desc">解析完成后自动建好模板并进入工作台</div>
@@ -116,7 +147,7 @@
 import { ref } from 'vue'
 import { uploadTemplateToWorkbench } from '../api/template'
 import { getUrlContext } from '../api/urlContext'
-import { TEMPLATE_KIND_OPTIONS } from '../types/listEnums'
+import { TEMPLATE_KIND_OPTIONS, REVIEW_STAGE_OPTIONS } from '../types/listEnums'
 
 const emit = defineEmits<{
   back: []
@@ -139,6 +170,15 @@ let toastTimer: ReturnType<typeof setTimeout> | undefined
 const needKindPick = !getUrlContext().type
 const kindOptions = TEMPLATE_KIND_OPTIONS
 const pickedKind = ref(kindOptions[0]?.value || '')
+
+// 预算绩效类型同理：后端能从达梦推出阶段时以后端为准，推不出来才用这个值。
+// 默认预选「事后」——不预选时用户容易直接跳过，库里会留空 review_stage，
+// 列表页的阶段 tag 渲染成空白。后端同样有 DEFAULT_REVIEW_STAGE 兜底。
+const stageOptions = REVIEW_STAGE_OPTIONS
+const DEFAULT_STAGE = 'post'
+const pickedStage = ref(
+  stageOptions.some(o => o.value === DEFAULT_STAGE) ? DEFAULT_STAGE : (stageOptions[0]?.value || ''),
+)
 
 function stepClass(i: number) {
   if (i < stepIndex.value) return 'done'
@@ -194,6 +234,7 @@ async function run(file: File) {
     const created = await uploadTemplateToWorkbench(
       file,
       needKindPick ? pickedKind.value : '',
+      needKindPick ? pickedStage.value : '',
     )
     if (!created.success || !created.template_id) throw new Error('创建模板失败')
 
@@ -425,7 +466,26 @@ async function run(file: File) {
   box-shadow: 0 0 0 3px rgba(37, 99, 235, .18);
 }
 
-.kind-name { min-width: 0; }
+.kind-name { min-width: 0; white-space: nowrap; }
+
+/* 预算绩效类型是 4 项，面板内宽 494px 装不下 4×150+间隙，
+   auto-fit + 150px 会把第 4 项挤到第二行。这里固定 4 列并把卡片收窄。
+   窄屏（面板实际宽度 < 460px）再回落到两列，避免文字被压缩换行。 */
+.kind-opts--stage {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.kind-opts--stage .kind-opt {
+  gap: 7px;
+  padding: 11px 10px;
+  font-size: 12.5px;
+}
+
+@media (max-width: 460px) {
+  .kind-opts--stage { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .kind-opts--stage .kind-opt { font-size: 13px; padding: 12px 12px; }
+}
 
 /* ---- 选择文件 ---- */
 .picker {

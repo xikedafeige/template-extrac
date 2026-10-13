@@ -5,11 +5,16 @@
  * 方便发现后端返回的脏数据。
  */
 
-/** 委托任务类型 review_stage */
+/**
+ * 委托任务类型 review_stage
+ *
+ * 只做「值 → 中文」查询，不承担展示顺序——顺序由下面 REVIEW_STAGE_OPTIONS
+ * 显式声明，避免以后调整上传页选项顺序时连带影响别处。
+ */
 const REVIEW_STAGE_MAP: Record<string, string> = {
-  post: '事后',
-  mid: '事中',
   pre: '事前',
+  mid: '事中',
+  post: '事后',
   goal: '绩效目标',
 }
 
@@ -38,3 +43,15 @@ export function templateKindLabel(v?: number | string | null): string {
  */
 export const TEMPLATE_KIND_OPTIONS: { value: string; label: string }[] =
   Object.entries(TEMPLATE_KIND_MAP).map(([value, label]) => ({ value, label }))
+
+/**
+ * 上传页的预算绩效类型候选项。
+ *
+ * 文案仍取自 REVIEW_STAGE_MAP，保证与列表页 tag 一致；
+ * 展示顺序在这里显式指定：绩效目标（跨阶段的总目标）排在最前，
+ * 其余按事前 → 事中 → 事后的时间轴。
+ */
+const REVIEW_STAGE_ORDER = ['goal', 'pre', 'mid', 'post']
+
+export const REVIEW_STAGE_OPTIONS: { value: string; label: string }[] =
+  REVIEW_STAGE_ORDER.map((value) => ({ value, label: REVIEW_STAGE_MAP[value] }))
